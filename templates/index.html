@@ -403,6 +403,23 @@
     .weight-decrease {
       color: var(--danger);
     }
+ /* 強制顯示數字輸入框的調整按鈕 */
+input[type=number] {
+    -moz-appearance: textfield; /* Firefox */
+}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+    -webkit-appearance: inner-spin-button !important; /* Chrome, Safari, Edge */
+    opacity: 1 !important;
+}
+
+/* 確保下拉選單正常顯示 (防止 CSS 隱藏) */
+select[name="group"] {
+    -webkit-appearance: menulist;
+    -moz-appearance: menulist;
+    appearance: menulist;
+}
+   
   </style>
 </head>
 <body>
