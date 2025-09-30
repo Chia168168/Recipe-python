@@ -869,6 +869,66 @@
         }
     }
 
+// --- 核心渲染函數 ---
+
+function renderRecipesList(recipes) {
+    const listContainer = document.getElementById('recipes-list');
+    listContainer.innerHTML = ''; // 清空列表
+
+    if (recipes.length === 0) {
+        listContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-book-open"></i>
+                <h3>尚無食譜資料</h3>
+                <p>請前往「食譜管理」新增您的第一個食譜。</p>
+            </div>
+        `;
+        return;
+    }
+
+    recipes.forEach(recipe => {
+        const card = document.createElement('div');
+        card.className = 'recipe-card';
+        card.innerHTML = `
+            <div class="recipe-header">
+                <h3 class="recipe-title">${recipe.title}</h3>
+                <div class="action-buttons">
+                    <button class="btn btn-sm btn-info" onclick="loadRecipeToForm(ALL_RECIPES_DATA.find(r => r.title === '${recipe.title}'))"><i class="fas fa-edit"></i> 修改</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteRecipe('${recipe.title}')"><i class="fas fa-trash"></i> 刪除</button>
+                    <button class="btn btn-sm btn-warning" onclick="openConversionModal('${recipe.title}')"><i class="fas fa-calculator"></i> 換算</button>
+                </div>
+            </div>
+            <div class="recipe-meta">建立時間: ${new Date(recipe.timestamp).toLocaleString()}</div>
+            
+            <div class="baking-container">
+                <strong>烘烤設定:</strong> 
+                上火 ${recipe.baking.topHeat}°C / 下火 ${recipe.baking.bottomHeat}°C (${recipe.baking.time} min) |
+                旋風: ${recipe.baking.convection ? '是' : '否'} | 蒸汽: ${recipe.baking.steam ? '是' : '否'}
+            </div>
+
+            <table class="ingredient-table">
+                <thead><tr><th>分組</th><th>食材</th><th>重量 (g)</th><th>百分比</th><th>說明</th></tr></thead>
+                <tbody>
+                    ${recipe.ingredients.map(ing => `
+                        <tr>
+                            <td>${ing.group || '-'}</td>
+                            <td>${ing.name || '-'}</td>
+                            <td>${ing.weight ? parseFloat(ing.weight).toFixed(1) : '-'}</td>
+                            <td>${ing.percent ? (ing.percent * 100).toFixed(2) + '%' : '-'}</td>
+                            <td>${ing.desc || ''}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            
+            <div class="steps-container">
+                <strong>製作步驟:</strong>
+                <pre>${recipe.steps || '無步驟說明'}</pre>
+            </div>
+        `;
+        listContainer.appendChild(card);
+    });
+}
 
     // 確保表單載入時至少有一個分組和一個食材行
     window.addEventListener('load', resetForm); 
