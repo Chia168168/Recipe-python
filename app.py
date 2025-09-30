@@ -5,10 +5,9 @@ import os
 
 app = Flask(__name__)
 
-# --- 檔案路徑設定：使用 os 模組建構絕對路徑 ---
+# --- 檔案路徑設定 ---
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-# 資料庫與 CSV 檔案的路徑
 DATABASE = os.path.join(BASE_DIR, 'recipes.db')
 RECIPES_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - 食譜.csv')
 INGREDIENTS_DB_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - Ingredients.csv')
@@ -18,9 +17,8 @@ INGREDIENTS_DB_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - Ingredient
 def get_db():
     """在每個請求中獲取一個資料庫連線，如果不存在則創建。"""
     if 'db' not in g:
-        # check_same_thread=False 適用於 Gunicorn 這種多線程/多進程環境
         g.db = sqlite3.connect(DATABASE, check_same_thread=False)
-        g.db.row_factory = sqlite3.Row  # 讓查詢結果以字典形式返回
+        g.db.row_factory = sqlite3.Row
     return g.db
 
 @app.teardown_appcontext
@@ -30,70 +28,93 @@ def close_db(e=None):
     if db is not None:
         db.close()
 
-# --- 資料載入與初始化 ---
+# --- 資料載入與初始化函式 ---
 
 def init_db_and_load_data():
-    """初始化資料庫並從 CSV 載入資料 (只在應用程式啟動時運行一次)。"""
-    # 使用一個獨立的連線來執行初始化，不使用 g.db
-    conn = sqlite3.connect(DATABASE)
+    """
+    從 CSV 載入數據到 SQLite 資料庫。
+    此函式應在需要確保數據存在時呼叫。
+    """
+    # 這裡使用一個單獨的連線來執行寫入操作
+    conn = sqlite3.connect(DATABASE) 
     
     try:
-        print("正在檢查並載入食譜數據...")
-        
+        print("INFO: 正在執行數據載入 (CSV -> SQLite)...")
+
         # 1. 載入食譜數據
         if not os.path.exists(RECIPES_CSV_FILE):
-             raise FileNotFoundError(RECIPES_CSV_FILE)
+             print(f"FATAL: 找不到食譜 CSV 檔案：{RECIPES_CSV_FILE}")
+             return 
 
         recipes_df = pd.read_csv(RECIPES_CSV_FILE)
         recipes_df['重量 (g)'] = pd.to_numeric(recipes_df['重量 (g)'], errors='coerce').fillna(0)
         recipes_df['百分比'] = recipes_df['百分比'].astype(str).str.replace('%', '').str.strip()
         recipes_df['百分比'] = pd.to_numeric(recipes_df['百分比'], errors='coerce').fillna(0) / 100
         
-        # 使用 if_exists='replace' 確保每次啟動都重新載入最新的 CSV 數據
+        # 使用 if_exists='replace' 確保每次都建立新表
         recipes_df.to_sql('recipes', conn, if_exists='replace', index=False)
-        print(f"成功載入 {len(recipes_df)} 筆食譜紀錄到 'recipes' 表。")
+        print(f"INFO: 成功載入 {len(recipes_df)} 筆食譜紀錄到 'recipes' 表。")
 
         # 2. 載入食材資料庫數據
         if not os.path.exists(INGREDIENTS_DB_CSV_FILE):
-             raise FileNotFoundError(INGREDIENTS_DB_CSV_FILE)
-
+             print(f"FATAL: 找不到食材 CSV 檔案：{INGREDIENTS_DB_CSV_FILE}")
+             return
+        
         ingredients_df = pd.read_csv(INGREDIENTS_DB_CSV_FILE)
         ingredients_df['hydration'] = pd.to_numeric(ingredients_df['hydration'], errors='coerce').fillna(0)
         ingredients_df.to_sql('ingredients_db', conn, if_exists='replace', index=False)
-        print(f"成功載入 {len(ingredients_df)} 筆食材紀錄到 'ingredients_db' 表。")
+        print(f"INFO: 成功載入 {len(ingredients_df)} 筆食材紀錄到 'ingredients_db' 表。")
         
-    except FileNotFoundError as e:
-        print(f"致命錯誤：找不到 CSV 檔案 - {e.filename}。請確認檔案已放置在專案根目錄。")
     except Exception as e:
-        print(f"資料庫初始化或數據載入失敗: {e}")
+        print(f"ERROR: 資料載入失敗: {e}")
     finally:
         conn.close()
 
-# 在應用程式啟動時運行一次，確保數據在所有工作進程啟動前準備好
-# 我們使用 app.before_first_request 或 app.cli.command 來處理 WSGI 環境
-# 在 Render/Gunicorn 環境中，最簡單且穩健的方式是直接調用它（因為 Gunicorn 的啟動模式）
-# 或者使用 Flask CLI command
+# 為了確保在 Gunicorn 工作進程啟動時有數據，我們讓它執行一次。
+# 實際請求時，會再進行一次檢查 (見 get_recipe_list_from_db)
+# 這樣設計可以在大多數情況下讓啟動更流暢。
 try:
     init_db_and_load_data()
 except Exception as e:
-    print(f"應用程式啟動資料載入失敗: {e}")
+    print(f"WARNING: 應用程式啟動時的資料載入失敗，將依賴第一次請求的檢查：{e}")
 
 
-# --- 數據查詢工具函式 (改用 get_db() 獲取連線) ---
+# --- 數據查詢工具函式 (新增表格檢查) ---
+
+def check_table_exists(db, table_name):
+    """檢查指定的表格是否在資料庫中存在。"""
+    query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+    return db.execute(query, (table_name,)).fetchone() is not None
 
 def get_recipe_list_from_db():
-    """從資料庫獲取所有不重複的食譜名稱"""
+    """從資料庫獲取所有不重複的食譜名稱，並在必要時觸發載入。"""
     db = get_db()
-    # 這裡必須使用雙引號來包住中文欄位名稱
+    
+    # 【關鍵修正】檢查表格是否存在。若不存在，強制執行初始化。
+    if not check_table_exists(db, 'recipes'):
+        print("WARNING: 'recipes' 表格不存在，觸發強制數據載入。")
+        # 關閉當前工作進程的連線，執行初始化，然後重新連線
+        close_db()
+        init_db_and_load_data()
+        db = get_db() # 重新獲取連線
+
+        # 在重新嘗試查詢前，再次檢查表格是否存在 (以防 CSV 檔案丟失)
+        if not check_table_exists(db, 'recipes'):
+            print("FATAL: 強制載入後 'recipes' 表格仍不存在。返回空列表。")
+            return []
+
+    # 執行查詢
     recipe_names = db.execute("SELECT DISTINCT \"食譜名稱\" FROM recipes ORDER BY \"食譜名稱\"").fetchall()
     return [name[0] for name in recipe_names]
 
 def get_recipe_details_from_db(recipe_name):
     """根據食譜名稱從資料庫獲取所有食材行"""
     db = get_db()
+    # 這裡可以假設如果 get_recipe_list_from_db 成功，recipes 表格就存在
     query = 'SELECT * FROM recipes WHERE "食譜名稱" = ?'
     rows = db.execute(query, (recipe_name,)).fetchall()
     return [dict(row) for row in rows]
+
 
 # --- 核心邏輯 (保持不變) ---
 
@@ -138,23 +159,20 @@ def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_gr
         "ingredients": converted_ingredients
     }
 
-# --- Flask 路由 ---
+# --- Flask 路由 (保持不變) ---
 
 @app.route('/')
 def index():
-    """提供前端 HTML 頁面"""
     return render_template('index.html')
 
 @app.route('/get_recipe_list', methods=['GET'])
 def get_recipe_list():
-    """提供食譜名稱列表給前端"""
-    # 這裡會自動使用 get_db()
     recipe_names = get_recipe_list_from_db()
+    # 如果 data_init 失敗，前端會收到空列表 []
     return jsonify(recipe_names)
 
 @app.route('/load_recipe', methods=['POST'])
 def load_recipe():
-    """根據食譜名稱載入詳細數據"""
     data = request.json
     recipe_name = data.get('recipeName')
     
@@ -184,7 +202,6 @@ def load_recipe():
 
 @app.route('/calculate_conversion', methods=['POST'])
 def handle_calculate_conversion():
-    """處理前端的食材換算請求"""
     data = request.json
     
     recipe_name = data.get('recipeName')
