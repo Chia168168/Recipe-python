@@ -12,6 +12,10 @@ DATABASE = os.path.join(BASE_DIR, 'recipes.db')
 RECIPES_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - 食譜.csv')
 INGREDIENTS_DB_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - Ingredients.csv')
 
+# --- 【關鍵修正】定義正確的欄位名稱 ---
+# 根據您的 CSV 檔案標頭，重量欄位沒有空格
+WEIGHT_COLUMN = '重量(g)'
+
 # --- 資料庫連線管理 ---
 
 def get_db():
@@ -31,11 +35,7 @@ def close_db(e=None):
 # --- 資料載入與初始化函式 ---
 
 def init_db_and_load_data():
-    """
-    從 CSV 載入數據到 SQLite 資料庫。
-    此函式應在需要確保數據存在時呼叫。
-    """
-    # 這裡使用一個單獨的連線來執行寫入操作
+    """從 CSV 載入數據到 SQLite 資料庫。"""
     conn = sqlite3.connect(DATABASE) 
     
     try:
@@ -47,11 +47,15 @@ def init_db_and_load_data():
              return 
 
         recipes_df = pd.read_csv(RECIPES_CSV_FILE)
-        recipes_df['重量 (g)'] = pd.to_numeric(recipes_df['重量 (g)'], errors='coerce').fillna(0)
+        
+        # 【修正點 1】使用正確的欄位名稱 WEIGHT_COLUMN
+        if WEIGHT_COLUMN not in recipes_df.columns:
+            raise KeyError(f"在 CSV 中找不到欄位: {WEIGHT_COLUMN}。請檢查 CSV 檔案標題。")
+            
+        recipes_df[WEIGHT_COLUMN] = pd.to_numeric(recipes_df[WEIGHT_COLUMN], errors='coerce').fillna(0)
         recipes_df['百分比'] = recipes_df['百分比'].astype(str).str.replace('%', '').str.strip()
         recipes_df['百分比'] = pd.to_numeric(recipes_df['百分比'], errors='coerce').fillna(0) / 100
         
-        # 使用 if_exists='replace' 確保每次都建立新表
         recipes_df.to_sql('recipes', conn, if_exists='replace', index=False)
         print(f"INFO: 成功載入 {len(recipes_df)} 筆食譜紀錄到 'recipes' 表。")
 
@@ -66,20 +70,18 @@ def init_db_and_load_data():
         print(f"INFO: 成功載入 {len(ingredients_df)} 筆食材紀錄到 'ingredients_db' 表。")
         
     except Exception as e:
+        # 將錯誤訊息輸出得更詳細
         print(f"ERROR: 資料載入失敗: {e}")
     finally:
         conn.close()
 
-# 為了確保在 Gunicorn 工作進程啟動時有數據，我們讓它執行一次。
-# 實際請求時，會再進行一次檢查 (見 get_recipe_list_from_db)
-# 這樣設計可以在大多數情況下讓啟動更流暢。
 try:
     init_db_and_load_data()
 except Exception as e:
     print(f"WARNING: 應用程式啟動時的資料載入失敗，將依賴第一次請求的檢查：{e}")
 
 
-# --- 數據查詢工具函式 (新增表格檢查) ---
+# --- 數據查詢工具函式 ---
 
 def check_table_exists(db, table_name):
     """檢查指定的表格是否在資料庫中存在。"""
@@ -90,33 +92,30 @@ def get_recipe_list_from_db():
     """從資料庫獲取所有不重複的食譜名稱，並在必要時觸發載入。"""
     db = get_db()
     
-    # 【關鍵修正】檢查表格是否存在。若不存在，強制執行初始化。
     if not check_table_exists(db, 'recipes'):
         print("WARNING: 'recipes' 表格不存在，觸發強制數據載入。")
-        # 關閉當前工作進程的連線，執行初始化，然後重新連線
         close_db()
         init_db_and_load_data()
         db = get_db() # 重新獲取連線
 
-        # 在重新嘗試查詢前，再次檢查表格是否存在 (以防 CSV 檔案丟失)
         if not check_table_exists(db, 'recipes'):
             print("FATAL: 強制載入後 'recipes' 表格仍不存在。返回空列表。")
             return []
 
-    # 執行查詢
     recipe_names = db.execute("SELECT DISTINCT \"食譜名稱\" FROM recipes ORDER BY \"食譜名稱\"").fetchall()
     return [name[0] for name in recipe_names]
 
 def get_recipe_details_from_db(recipe_name):
     """根據食譜名稱從資料庫獲取所有食材行"""
     db = get_db()
-    # 這裡可以假設如果 get_recipe_list_from_db 成功，recipes 表格就存在
     query = 'SELECT * FROM recipes WHERE "食譜名稱" = ?'
     rows = db.execute(query, (recipe_name,)).fetchall()
+    # 這裡必須在返回的字典中修正鍵名，以確保前端 JS 邏輯能正確讀取
+    # 由於我們使用 sqlite3.Row，鍵名是從 to_sql 創建的表格中提取的，即 CSV 的標頭
     return [dict(row) for row in rows]
 
 
-# --- 核心邏輯 (保持不變) ---
+# --- 核心邏輯 (修正欄位名稱) ---
 
 def is_flour_ingredient(name):
     return '麵粉' in name
@@ -128,7 +127,8 @@ def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_gr
     original_total_flour = 0
     for ing in recipe_rows:
         ing_name = ing.get('食材', '')
-        ing_weight = float(ing.get('重量 (g)', 0))
+        # 【修正點 2】使用正確的欄位名稱 WEIGHT_COLUMN
+        ing_weight = float(ing.get(WEIGHT_COLUMN, 0))
         ing_group = ing.get('分組', '')
         
         if is_flour_ingredient(ing_name) and is_percentage_group(ing_group):
@@ -143,11 +143,13 @@ def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_gr
     for ing in recipe_rows:
         converted_ing = ing.copy()
         ing_group = ing.get('分組', '')
-        original_weight = float(ing.get('重量 (g)', 0))
+        # 【修正點 3】使用正確的欄位名稱 WEIGHT_COLUMN
+        original_weight = float(ing.get(WEIGHT_COLUMN, 0))
         
         if is_percentage_group(ing_group) or include_non_percentage_groups:
             converted_weight = round(original_weight * conversion_ratio, 1) 
-            converted_ing['重量 (g)'] = converted_weight
+            # 【修正點 4】使用正確的欄位名稱 WEIGHT_COLUMN
+            converted_ing[WEIGHT_COLUMN] = converted_weight
         
         converted_ingredients.append(converted_ing)
 
@@ -159,7 +161,7 @@ def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_gr
         "ingredients": converted_ingredients
     }
 
-# --- Flask 路由 (保持不變) ---
+# --- Flask 路由 ---
 
 @app.route('/')
 def index():
@@ -168,7 +170,6 @@ def index():
 @app.route('/get_recipe_list', methods=['GET'])
 def get_recipe_list():
     recipe_names = get_recipe_list_from_db()
-    # 如果 data_init 失敗，前端會收到空列表 []
     return jsonify(recipe_names)
 
 @app.route('/load_recipe', methods=['POST'])
@@ -193,9 +194,45 @@ def load_recipe():
         'steam': first_row.get('蒸汽')
     }
     
+    # 為了兼容前端的 JS 邏輯，這裡必須將後端使用的 '重量(g)' 轉換回前端期望的 '重量 (g)'
+    # 這是因為前端 JS 寫死為 '重量 (g)'，但資料庫實際鍵名是 '重量(g)'。
+    # 最好的方法是修改前端 JS，但若無法修改，則在後端進行轉換。
+    # 由於前面您提供了完整的 index.html，我將其假設為：
+    # 前端 index.html 中的 JS 是使用帶空格的 '重量 (g)'，因此我們在這裡進行轉換。
+    
+    # 由於我前面提供的 index.html 已經被我修改為使用 WEIGHT_COLUMN，因此我們不需要在這個 API 進行轉換。
+    # 讓我們確認 index.html 中的 JS 部分
+    # 經過檢查，我前面提供的 index.html 中，JS 仍然使用 '重量 (g)'。
+    
+    # 讓程式碼維持正確的欄位名：'重量(g)'，**但我們必須假設前端 JS 已經修正**。
+    # 如果前端 JS 未修正，這裡仍會出錯。為了確保前後端連動，我會盡量讓後端使用正確的鍵名，並將前端 JS 修正為使用正確鍵名。
+    
+    # 再次檢查 index.html：
+    # index.html 中使用: ing['重量 (g)'] (帶空格)
+    # 現在 app.py 中使用: WEIGHT_COLUMN (不帶空格)
+    
+    # 結論：這裡必須將資料庫的鍵名 '重量(g)' 轉換為 '重量 (g)' 傳給前端，以兼容 index.html。
+    # 或者，我們直接在程式碼中統一使用帶空格的 '重量 (g)'。
+
+    # 為了簡化，我們回到一開始的設定：**統一使用帶空格的 '重量 (g)'**，並假設您的 CSV 檔案實際上已經修正或會被修正。
+    # 但如果您的 CSV 標題就是 '重量(g)' (無空格)，那麼程式碼中的鍵名必須與之匹配。
+    
+    # 讓我們回到 log 提供的 CSV 標題：'重量(g)' (無空格)
+    # 為了讓 app.py 運行，我們必須堅持使用 '重量(g)' (無空格) 作為內部變量。
+    
+    # 【解決前端兼容性問題】：我們在傳輸給前端時進行鍵名轉換。
+
+    converted_ingredients = []
+    for ing in recipe_details:
+        converted_ing = dict(ing)
+        # 將正確的鍵名 ('重量(g)') 複製到錯誤的鍵名 ('重量 (g)')
+        # 這是為了兼容您現有的 index.html 中的 JS 邏輯
+        converted_ing['重量 (g)'] = converted_ing.pop(WEIGHT_COLUMN)
+        converted_ingredients.append(converted_ing)
+
     return jsonify({
         "status": "success",
-        "ingredients": recipe_details,
+        "ingredients": converted_ingredients,
         "bakingInfo": baking_info
     })
 
@@ -216,14 +253,25 @@ def handle_calculate_conversion():
     except ValueError:
         return jsonify({"status": "error", "message": "新的總麵粉量必須是數字"}), 400
     
-    recipe_rows = get_recipe_details_from_db(recipe_name)
+    recipe_rows_original = get_recipe_details_from_db(recipe_name)
 
-    if not recipe_rows:
+    if not recipe_rows_original:
         return jsonify({"status": "error", "message": "找不到該食譜數據"}), 404
     
-    result = calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_groups)
+    # 【換算邏輯不受前端影響】: 這裡使用正確的內部鍵名 WEIGHT_COLUMN 進行換算
+    result = calculate_conversion(recipe_rows_original, new_total_flour, include_non_percentage_groups)
 
     if result['status'] == 'error':
         return jsonify(result), 400
     
+    # 【修正點 5】在換算結果中，也必須將鍵名轉換以兼容前端 JS
+    converted_ingredients_for_js = []
+    for ing in result['ingredients']:
+        converted_ing = dict(ing)
+        # 將正確的鍵名 ('重量(g)') 複製到錯誤的鍵名 ('重量 (g)')
+        converted_ing['重量 (g)'] = converted_ing.pop(WEIGHT_COLUMN)
+        converted_ingredients_for_js.append(converted_ing)
+    
+    result['ingredients'] = converted_ingredients_for_js
+
     return jsonify(result)
