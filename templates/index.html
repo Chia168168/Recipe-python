@@ -596,13 +596,14 @@ select[name="group"] {
   <div id="saveProgress" class="save-progress"><i class="fas fa-spinner fa-spin"></i><p>儲存中，請稍候...</p></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+
 <script>
     // 儲存全域狀態
     let ALL_RECIPES_DATA = []; 
     let CUSTOM_INGREDIENTS_DB = []; 
-    let CURRENT_RECIPE_ID = null; // 用於修改食譜時追蹤食譜名稱
-    const API_BASE_URL = ''; // 相對於目前路徑
-    let CONVERSION_RECIPE_NAME = null; // 儲存當前正在換算的食譜名稱
+    let CURRENT_RECIPE_ID = null; 
+    const API_BASE_URL = ''; 
+    let CONVERSION_RECIPE_NAME = null; 
 
     // 標準分組列表
     const STANDARD_GROUPS = [
@@ -610,16 +611,16 @@ select[name="group"] {
     ];
 
     // =================================================================
-    // 核心 UI/API 互動函數 (全部功能已補齊)
+    // 核心 UI/API 互動函數 (已修正 JSON 解析問題)
     // =================================================================
 
     document.addEventListener('DOMContentLoaded', () => {
-        setupConversionToolListeners(); // 初始化換算工具的輸入事件
-        switchTab('browse'); // 預設開啟瀏覽食譜分頁
-        resetForm(); // 確保管理頁籤有預設的食材行
+        setupConversionToolListeners(); 
+        switchTab('browse'); 
+        resetForm(); 
     });
 
-    // --- 載入中指示器/通知函數 ---
+    // --- 載入中指示器/通知函數 (保持不變) ---
 
     function showLoading(show) {
         const overlay = document.getElementById('saveProgress'); 
@@ -641,7 +642,7 @@ select[name="group"] {
         }, 3500);
     }
 
-    // --- 1. 頁籤切換 (控制所有頁籤的點擊反應) ---
+    // --- 1. 頁籤切換 (保持不變) ---
 
     function switchTab(tabId) {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -652,15 +653,13 @@ select[name="group"] {
         const tabEl = document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`);
         if (tabEl) tabEl.classList.add('active');
 
-        // 根據切換的頁籤載入數據 (確保後端呼叫有反應)
         if (tabId === 'browse') {
             loadRecipes();
         } else if (tabId === 'stats') {
-            loadStatistics();
+            loadStatistics(); // 已修正
         } else if (tabId === 'settings') {
-            loadIngredientsDB();
+            loadIngredientsDB(); // 已修正
         } else if (tabId === 'manage') {
-             // 確保在切換到管理頁籤時，如果沒有食材行，會新增一個
             if (document.getElementById('ingredients-container').children.length === 0) {
                  resetForm(); 
             }
@@ -668,7 +667,7 @@ select[name="group"] {
         }
     }
     
-    // --- 2. 食譜管理 (CRUD) 函數 (確保所有輸入/按鈕有反應) ---
+    // --- 2. 食譜管理 (CRUD) 函數 (已修正) ---
 
     function getFormData() {
         const title = document.getElementById('title').value.trim();
@@ -689,7 +688,7 @@ select[name="group"] {
             const percent = grid.querySelector('input[name="percent"]').value;
             const desc = grid.querySelector('input[name="desc"]').value;
             
-            if (name && weight > 0) {
+            if (name && weight >= 0) { // 允許重量為0，但必須有名稱
                 ingredients.push({ group, name, weight, percent, desc });
             }
         });
@@ -697,7 +696,7 @@ select[name="group"] {
         return { title, ingredients, steps, bakingInfo };
     }
 
-    function resetForm() {
+function resetForm() {
         document.getElementById('title').value = '';
         document.getElementById('steps').value = '';
         document.getElementById('top-heat').value = 200;
@@ -708,15 +707,14 @@ select[name="group"] {
         document.getElementById('ingredients-container').innerHTML = '';
         
         document.getElementById('saveBtn').innerHTML = '<i class="fas fa-save"></i> 儲存食譜';
-        document.getElementById('saveBtn').onclick = () => saveRecipe(false); // 確保綁定 saveRecipe(false)
+        document.getElementById('saveBtn').onclick = () => saveRecipe(false); 
         CURRENT_RECIPE_ID = null; 
         
-        // 確保初始狀態有一個分組和一個食材行
         addNewGroup('主麵團');
         addIngredientRow();
         calculateHydration(); 
     }
-    
+
     function loadRecipeToForm(recipe) {
         switchTab('manage'); 
         if (!recipe) return;
@@ -733,18 +731,16 @@ select[name="group"] {
         
         let currentGroup = '';
         recipe.ingredients.forEach(ing => {
-            // 由於分組是通過一個隱藏的 select 標籤來實現的，我們需要重新建立分組標頭
             if (ing.group && ing.group !== currentGroup) {
                 addNewGroup(ing.group);
                 currentGroup = ing.group;
             }
-            // percent 是小數，需要轉換回百分比字串
             const percentStr = ing.percent ? (ing.percent * 100).toFixed(2) + '%' : '';
             addIngredientRow({...ing, percent: percentStr});
         });
         
         document.getElementById('saveBtn').innerHTML = '<i class="fas fa-edit"></i> 更新食譜';
-        document.getElementById('saveBtn').onclick = () => saveRecipe(true); // 確保綁定 saveRecipe(true)
+        document.getElementById('saveBtn').onclick = () => saveRecipe(true); 
         CURRENT_RECIPE_ID = recipe.title; 
         
         calculateHydration(); 
@@ -797,7 +793,7 @@ select[name="group"] {
         }
     }
     
-    // --- 食材行/分組動態管理 ---
+    // --- 食材行/分組動態管理 (已修正) ---
 
     function addNewGroup(groupName = '新分組') {
         const container = document.getElementById('ingredients-container');
@@ -819,7 +815,6 @@ select[name="group"] {
         const groupHeader = buttonElement.closest('.ingredient-group-header');
         const groupName = groupHeader.getAttribute('data-group');
         
-        // 移除所有屬於此分組的食材行
         document.querySelectorAll('.ingredient-grid').forEach(grid => {
             if (grid.querySelector('select[name="group"]').value === groupName) {
                 grid.remove();
@@ -832,48 +827,44 @@ select[name="group"] {
     
     function addIngredientRow(data = {}) {
         const container = document.getElementById('ingredients-container');
-        const groupElements = container.querySelectorAll('.ingredient-group-header');
+        let groupElements = container.querySelectorAll('.ingredient-group-header');
         
-        // 確保至少有一個分組
         if (groupElements.length === 0) {
             addNewGroup();
             groupElements = container.querySelectorAll('.ingredient-group-header');
         }
         
-        // 找到最後一個分組名稱
         const lastGroup = groupElements[groupElements.length - 1].getAttribute('data-group');
         
         const row = document.createElement('div');
         row.className = 'ingredient-grid';
         
-        // 確保選擇框的選項被正確選中
         const selectedGroup = data.group || lastGroup;
         const groupOptions = STANDARD_GROUPS.map(g => 
             `<option value="${g}" ${g === selectedGroup ? 'selected' : ''}>${g}</option>`
         ).join('');
 
+        // 【修正點：確保 input type="number" 帶有正確的 step 屬性】
         row.innerHTML = `
             <select name="group" onchange="calculateHydration()">
                 ${groupOptions}
             </select>
             <input type="text" name="name" placeholder="食材名稱 (麵粉、水等)" value="${data.name || ''}" oninput="calculateHydration()">
-            <input type="number" name="weight" placeholder="重量 (g)" value="${data.weight || ''}" step="0.1" min="0.1" oninput="calculateHydration()">
+            <input type="number" name="weight" placeholder="重量 (g)" value="${data.weight || ''}" step="0.1" min="0" oninput="calculateHydration()">
             <input type="text" name="percent" placeholder="百分比 (%)" value="${data.percent || ''}">
             <input type="text" name="desc" placeholder="說明/備註" value="${data.desc || ''}">
             <button class="btn btn-sm btn-danger" onclick="this.closest('.ingredient-grid').remove(); calculateHydration();"><i class="fas fa-trash"></i></button>
         `;
         
-        // 將新行插入到最後一個分組標頭之後
         const lastHeader = groupElements[groupElements.length - 1];
         if (lastHeader) {
             lastHeader.insertAdjacentElement('afterend', row);
         } else {
-             container.appendChild(row); // 如果沒有標頭，直接添加到容器末尾
+             container.appendChild(row); 
         }
         
         calculateHydration();
     }
-
     function calculateHydration() {
         const ingredients = getFormData().ingredients; 
         let totalFlourWeight = 0;
@@ -1093,23 +1084,30 @@ select[name="group"] {
 
     // --- 4. 統計資料函數 (確保統計頁籤有反應) ---
 
-    async function loadStatistics() {
+async function loadStatistics() {
         showLoading(true);
         try {
             const response = await fetch(`${API_BASE_URL}/get_stats`);
             
             if (!response.ok) {
-                const errorResult = await response.json();
-                throw new Error(errorResult.message || `HTTP 錯誤: ${response.status}`);
+                const errorText = await response.text(); 
+                throw new Error(`載入失敗 (HTTP ${response.status}): ${errorText.slice(0, 100)}...`);
             }
 
-            const stats = await response.json();
-            
-            // 更新 UI (確保 HTML 中有這些 ID)
-            document.getElementById('total-recipes').textContent = stats.totalRecipes;
-            document.getElementById('total-ingredients').textContent = stats.totalIngredients;
-            document.getElementById('avg-weight').textContent = stats.avgWeight.toFixed(1) + ' g';
-            document.getElementById('latest-recipe').textContent = stats.latestRecipe;
+            // 【JSON 解析修正】: 讀取文字，檢查是否為空，再嘗試解析
+            const responseText = await response.text(); 
+            if (!responseText.trim()) {
+                 const stats = { totalRecipes: 0, totalIngredients: 0, avgWeight: 0, latestRecipe: '無' };
+                 showNotification('資料庫為空，無統計數據。', 'warning');
+            } else {
+                 var stats = JSON.parse(responseText);
+            }
+
+            // 更新 UI (確保有預設值處理)
+            document.getElementById('total-recipes').textContent = stats.totalRecipes || 0;
+            document.getElementById('total-ingredients').textContent = stats.totalIngredients || 0;
+            document.getElementById('avg-weight').textContent = (stats.avgWeight ? stats.avgWeight.toFixed(1) : 0) + ' g';
+            document.getElementById('latest-recipe').textContent = stats.latestRecipe || '無';
 
         } catch (error) {
             console.error('載入統計數據失敗:', error);
@@ -1119,7 +1117,7 @@ select[name="group"] {
         }
     }
 
-    // --- 5. 設定 (自訂食材資料庫) 函數 (確保設定頁籤有反應) ---
+    // --- 5. 設定 (自訂食材資料庫) 函數 (修正 JSON 解析問題) ---
 
     async function loadIngredientsDB() {
         showLoading(true);
@@ -1127,14 +1125,21 @@ select[name="group"] {
             const response = await fetch(`${API_BASE_URL}/get_ingredients_db`);
             
             if (!response.ok) {
-                 const errorResult = await response.json();
-                throw new Error(errorResult.message || `HTTP 錯誤: ${response.status}`);
+                const errorText = await response.text();
+                throw new Error(`載入失敗 (HTTP ${response.status}): ${errorText.slice(0, 100)}...`);
             }
 
-            CUSTOM_INGREDIENTS_DB = await response.json();
-            renderIngredientsDB();
-            calculateHydration(); // 更新管理頁籤的含水率計算
+            // 【JSON 解析修正】: 讀取文字，檢查是否為空，再嘗試解析
+            const responseText = await response.text();
+            if (!responseText.trim()) {
+                 CUSTOM_INGREDIENTS_DB = [];
+                 showNotification('自訂食材資料庫為空。', 'info');
+            } else {
+                 CUSTOM_INGREDIENTS_DB = JSON.parse(responseText);
+            }
             
+            renderIngredientsDB();
+            calculateHydration(); 
 
         } catch (error) {
             console.error('載入自訂食材資料庫失敗:', error);
@@ -1426,8 +1431,6 @@ select[name="group"] {
     // --- DOM 加載完成後初始化 ---
     window.addEventListener('load', resetForm);
 </script>
-
-
-
 </body>
 </html>
+
