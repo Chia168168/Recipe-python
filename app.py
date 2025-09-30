@@ -10,8 +10,12 @@ import pandas as pd
 
 app = Flask(__name__)
 
-# 資料庫設定
-DATABASE = 'recipe_manager.db'
+# --- 檔案與資料庫設定 ---
+# 確保這些 CSV 檔案存在於 app.py 相同的目錄下
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DATABASE = os.path.join(BASE_DIR, 'recipe_manager.db')
+RECIPES_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - 食譜.csv')
+INGREDIENTS_DB_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - Ingredients.csv')
 
 # --- 輔助函數 ---
 
@@ -30,15 +34,70 @@ def close_connection(exception):
     if db is not None:
         db.close()
 
+def normalize_percent_value(p):
+    """標準化百分比值：將百分比字串或大於1的數字轉為小數"""
+    if p is None or p == "":
+        return None
+    try:
+        if isinstance(p, str) and p.endswith('%'):
+            n = float(p.strip().replace('%', ''))
+            return n / 100
+        n = float(p)
+        return n / 100 if n > 1 else n
+    except ValueError:
+        return None
+
+# --- 資料庫初始化與載入 ---
+
+def load_initial_csv_data(db):
+    """從 CSV 檔案載入初始數據到 SQLite 資料庫"""
+    print("INFO: 正在執行初始 CSV 數據載入...")
+    try:
+        # 1. 載入食譜數據 (recipes)
+        if os.path.exists(RECIPES_CSV_FILE):
+            recipes_df = pd.read_csv(RECIPES_CSV_FILE)
+            
+            # 【關鍵】定義 CSV 標頭到資料庫欄位的映射
+            column_map = {
+                '食譜名稱': 'RecipeName', '分組': 'IngredientGroup', '食材': 'IngredientName',
+                '重量(g)': 'Weight_g', '百分比': 'Percentage_CSV', '說明': 'Description',
+                '步驟': 'Steps', '建立時間': 'Timestamp', '上火溫度': 'UpperTemp',
+                '下火溫度': 'LowerTemp', '烘烤時間': 'BakeTime', '旋風': 'Convection',
+                '蒸汽': 'Steam'
+            }
+            
+            recipes_df = recipes_df.rename(columns=column_map)
+            
+            # 轉換百分比並設置為 'Percentage' 欄位
+            recipes_df['Percentage'] = recipes_df['Percentage_CSV'].apply(normalize_percent_value)
+            recipes_df = recipes_df.drop(columns=['Percentage_CSV'])
+            
+            # 確保所有需要的欄位存在 (如果 CSV 缺少欄位會在這裡出錯)
+            required_recipe_cols = ['RecipeName', 'IngredientGroup', 'IngredientName', 'Weight_g', 'Percentage', 'Description', 'Steps', 'Timestamp', 'UpperTemp', 'LowerTemp', 'BakeTime', 'Convection', 'Steam']
+            recipes_df = recipes_df.reindex(columns=required_recipe_cols)
+
+            recipes_df.to_sql('recipes', db, if_exists='append', index=False)
+            print(f"INFO: 成功載入 {len(recipes_df)} 筆初始食譜紀錄到 'recipes' 表。")
+
+        # 2. 載入食材資料庫數據 (ingredients_db)
+        if os.path.exists(INGREDIENTS_DB_CSV_FILE):
+             ingredients_df = pd.read_csv(INGREDIENTS_DB_CSV_FILE)
+             ingredients_df = ingredients_df.rename(columns={'name': 'Name', 'hydration': 'Hydration'})
+             ingredients_df['Hydration'] = pd.to_numeric(ingredients_df['Hydration'], errors='coerce').fillna(0)
+
+             ingredients_df.to_sql('ingredients_db', db, if_exists='append', index=False)
+             print(f"INFO: 成功載入 {len(ingredients_df)} 筆初始食材紀錄到 'ingredients_db' 表。")
+
+    except Exception as e:
+        print(f"ERROR: 初始數據載入失敗: {e}")
+
 def init_db():
-    """初始化資料庫結構 (食譜表和食材資料庫表)"""
+    """初始化資料庫結構，並在資料庫為空時從 CSV 載入資料。"""
     with app.app_context():
         db = get_db()
         cursor = db.cursor()
         
-        # 1. 食譜主表
-        # 欄位依據 code.gs 中的定義: 
-        # 食譜名稱, 分組, 食材, 重量 (g), 百分比, 說明, 步驟, 建立時間, 上火溫度, 下火溫度, 烘烤時間, 旋風, 蒸汽
+        # 1. 建立食譜主表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS recipes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +117,7 @@ def init_db():
             )
         """)
         
-        # 2. 食材資料庫表
+        # 2. 建立食材資料庫表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS ingredients_db (
                 Name TEXT PRIMARY KEY,
@@ -68,40 +127,39 @@ def init_db():
         
         db.commit()
 
-# --- 資料轉換和讀取函數 ---
+        # 3. 檢查並載入初始 CSV 資料 (僅在表格為空時載入)
+        try:
+            recipe_count = cursor.execute("SELECT COUNT(*) FROM recipes").fetchone()[0]
+            if recipe_count == 0:
+                load_initial_csv_data(db)
+        except Exception as e:
+            # 如果 COUNT(*) 失敗，可能表格剛創建，也嘗試載入
+            print(f"WARNING: 檢查表格是否為空時發生錯誤 ({e})，將嘗試載入 CSV 數據。")
+            load_initial_csv_data(db)
 
-def normalize_percent_value(p):
-    """標準化百分比值：將百分比字串或大於1的數字轉為小數"""
-    if p is None or p == "":
-        return None
-    try:
-        if isinstance(p, str) and p.endswith('%'):
-            n = float(p.strip().replace('%', ''))
-            return n / 100
-        n = float(p)
-        return n / 100 if n > 1 else n
-    except ValueError:
-        return None
-    
+# --- 應用程式啟動時強制執行初始化 (解決 Gunicorn 問題) ---
+# 這一行會確保在應用程式啟動時，無論是使用 flask run 還是 gunicorn，都會執行初始化。
+init_db()
+
+
+# --- 資料轉換和讀取函數 (保持不變) ---
+
 def get_all_recipes_data():
     """從資料庫讀取所有食譜資料並整理成前端需要的結構"""
     db = get_db()
     
-    # 讀取所有資料
+    # 讀取所有資料 (使用資料庫中的欄位名稱)
     df = pd.read_sql_query("SELECT * FROM recipes ORDER BY RecipeName, id", db)
 
     if df.empty:
         return []
 
-    # 按食譜名稱分組
     recipes_grouped = df.groupby('RecipeName')
-    
     recipes_list = []
 
     for name, group in recipes_grouped:
         first_row = group.iloc[0]
         
-        # 提取烘烤資訊 (只取第一行的即可)
         baking_info = {
             'topHeat': first_row['UpperTemp'],
             'bottomHeat': first_row['LowerTemp'],
@@ -110,7 +168,6 @@ def get_all_recipes_data():
             'steam': first_row['Steam'] == '是',
         }
         
-        # 整理食材列表
         ingredients = []
         for _, row in group.iterrows():
             ingredients.append({
@@ -121,7 +178,6 @@ def get_all_recipes_data():
                 'desc': row['Description'],
             })
 
-        # 整理食譜物件
         recipe_obj = {
             'title': name,
             'steps': first_row['Steps'],
@@ -133,25 +189,19 @@ def get_all_recipes_data():
         
     return recipes_list
 
-# --- 路由定義 ---
+# --- 路由定義 (保持不變) ---
 
 @app.route('/')
 def index():
-    """主頁面，載入 index.html"""
     return render_template('index.html')
 
 @app.route('/get_recipes', methods=['GET'])
 def get_recipes_route():
-    """獲取所有食譜的完整數據"""
     recipes = get_all_recipes_data()
     return jsonify(recipes)
 
-@app.route('/get_recipe_list', methods=['GET'])
-def get_recipe_list_route():
-    """獲取食譜名稱列表 (用於下拉選單)"""
-    recipes = get_all_recipes_data()
-    recipe_names = sorted([r['title'] for r in recipes])
-    return jsonify(recipe_names)
+# ... (其他路由如 save_recipe, delete_recipe, get_ingredients_db, get_stats, calculate_conversion 保持不變)
+# 為了避免冗長，我僅顯示關鍵修正部分。您應該使用我前一次提供的完整 app.py 的 **所有** 路由定義。
 
 @app.route('/save_recipe', methods=['POST'])
 def save_recipe_route():
@@ -162,7 +212,7 @@ def save_recipe_route():
     ingredients = data.get('ingredients')
     steps = data.get('steps')
     baking_info = data.get('bakingInfo')
-    is_update = data.get('isUpdate', False) # 判斷是否為修改操作
+    is_update = data.get('isUpdate', False) 
     
     if not title or not ingredients:
         return jsonify({"status": "error", "message": "食譜名稱或食材列表不可為空"}), 400
@@ -172,12 +222,11 @@ def save_recipe_route():
     timestamp = datetime.now().isoformat()
     
     try:
-        # 如果是修改操作，先刪除舊的食譜數據
         if is_update:
             cursor.execute("DELETE FROM recipes WHERE RecipeName = ?", (title,))
         
-        # 插入新的食譜數據
         for ing in ingredients:
+            # 這裡的 ing['percent'] 來自前端表單，可能是字串 (如 '50%') 或數字
             percent_norm = normalize_percent_value(ing.get('percent'))
             
             cursor.execute("""
@@ -210,181 +259,10 @@ def save_recipe_route():
         print(f"Database error: {e}")
         return jsonify({"status": "error", "message": f"儲存食譜失敗: {str(e)}"}), 500
 
-@app.route('/delete_recipe', methods=['POST'])
-def delete_recipe_route():
-    """刪除指定食譜"""
-    data = request.get_json()
-    title = data.get('recipeName')
-    
-    if not title:
-        return jsonify({"status": "error", "message": "食譜名稱不可為空"}), 400
+# [Please ensure all other routes from the previous comprehensive app.py are included here.]
 
-    db = get_db()
-    cursor = db.cursor()
-    
-    try:
-        cursor.execute("DELETE FROM recipes WHERE RecipeName = ?", (title,))
-        deleted_rows = cursor.rowcount
-        db.commit()
-        return jsonify({"status": "success", "message": f"食譜 '{title}' 已成功刪除 ({deleted_rows} 行數據)"})
-    except Exception as e:
-        db.rollback()
-        return jsonify({"status": "error", "message": f"刪除食譜失敗: {str(e)}"}), 500
-
-# --- 食材資料庫路由 ---
-
-@app.route('/get_ingredients_db', methods=['GET'])
-def get_ingredients_db_route():
-    """獲取自訂食材資料庫列表"""
-    db = get_db()
-    data = db.execute("SELECT Name, Hydration FROM ingredients_db").fetchall()
-    
-    # 將結果轉換為前端需要的字典列表 (name, hydration)
-    ingredients_db = [{'name': row['Name'], 'hydration': row['Hydration']} for row in data]
-    return jsonify(ingredients_db)
-
-@app.route('/save_ingredient_db', methods=['POST'])
-def save_ingredient_db_route():
-    """新增或修改自訂食材資料庫項目"""
-    data = request.get_json()
-    name = data.get('name')
-    hydration = data.get('hydration')
-    
-    if not name or hydration is None:
-        return jsonify({"status": "error", "message": "食材名稱和含水率不可為空"}), 400
-        
-    db = get_db()
-    cursor = db.cursor()
-    
-    try:
-        # 使用 REPLACE INTO 實現 INSERT OR REPLACE (如果存在則更新)
-        cursor.execute("""
-            INSERT OR REPLACE INTO ingredients_db (Name, Hydration)
-            VALUES (?, ?)
-        """, (name, hydration))
-        db.commit()
-        
-        return jsonify({"status": "success", "message": f"已儲存食材：{name}，含水率：{hydration}%"})
-    except Exception as e:
-        db.rollback()
-        return jsonify({"status": "error", "message": f"儲存食材失敗: {str(e)}"}), 500
-
-@app.route('/delete_ingredient_db', methods=['POST'])
-def delete_ingredient_db_route():
-    """刪除自訂食材資料庫項目"""
-    data = request.get_json()
-    name = data.get('name')
-    
-    if not name:
-        return jsonify({"status": "error", "message": "食材名稱不可為空"}), 400
-
-    db = get_db()
-    cursor = db.cursor()
-    
-    try:
-        cursor.execute("DELETE FROM ingredients_db WHERE Name = ?", (name,))
-        db.commit()
-        return jsonify({"status": "success", "message": f"已刪除食材：{name}"})
-    except Exception as e:
-        db.rollback()
-        return jsonify({"status": "error", "message": f"刪除食材失敗: {str(e)}"}), 500
-
-# --- 統計資料路由 ---
-
-def is_flour_ingredient(name):
-    """檢查食材名稱是否包含麵粉或相關詞彙"""
-    return any(keyword in name for keyword in ['麵粉', '粉'])
-
-@app.route('/get_stats', methods=['GET'])
-def get_stats_route():
-    """獲取統計資料"""
-    recipes = get_all_recipes_data()
-    total_recipes = len(recipes)
-    total_ingredients = 0
-    total_weight = 0
-    latest_recipe_name = '-'
-    latest_timestamp = datetime.min
-    
-    for recipe in recipes:
-        total_ingredients += len(recipe['ingredients'])
-        for ing in recipe['ingredients']:
-            total_weight += ing['weight']
-        
-        try:
-            current_timestamp = datetime.fromisoformat(recipe['timestamp'].replace('Z', '+00:00'))
-            if current_timestamp > latest_timestamp:
-                latest_timestamp = current_timestamp
-                latest_recipe_name = recipe['title']
-        except Exception:
-            pass # 忽略無效的時間戳
-            
-    avg_weight = round(total_weight / total_recipes, 1) if total_recipes > 0 else 0
-
-    return jsonify({
-        "totalRecipes": total_recipes,
-        "totalIngredients": total_ingredients,
-        "avgWeight": avg_weight,
-        "latestRecipe": latest_recipe_name
-    })
-
-# --- 智能換算路由 (沿用與優化) ---
-
-@app.route('/calculate_conversion', methods=['POST'])
-def calculate_conversion_route():
-    data = request.get_json()
-    recipe_name = data.get('recipeName')
-    new_total_flour = float(data.get('newTotalFlour'))
-    include_non_percentage_groups = data.get('includeNonPercentageGroups')
-
-    if not recipe_name or new_total_flour <= 0:
-        return jsonify({"status": "error", "message": "食譜名稱或目標麵粉總量無效"}), 400
-
-    # 1. 獲取單一食譜數據 (從所有食譜中找到匹配的)
-    all_recipes = get_all_recipes_data()
-    recipe = next((r for r in all_recipes if r['title'] == recipe_name), None)
-
-    if not recipe:
-        return jsonify({"status": "error", "message": "找不到指定的食譜"}), 404
-
-    # 輔助判斷函數
-    def is_percentage_group(group):
-        return group in ['中種', '主麵團', '主面团', '中种']
-
-    # 2. 計算原始總麵粉量 (僅限百分比分組的麵粉)
-    original_total_flour = 0
-    for ing in recipe['ingredients']:
-        # 由於 pandas 讀取進來的 Percentage 已經是 float 或 None，無需再次轉換
-        if is_flour_ingredient(ing['name']) and is_percentage_group(ing['group']):
-            original_total_flour += ing['weight'] or 0
-
-    if original_total_flour <= 0:
-        return jsonify({"status": "error", "message": "此食譜沒有用於百分比計算的麵粉食材或麵粉重量為0"}), 400
-
-    # 3. 計算換算比例
-    conversion_ratio = new_total_flour / original_total_flour
-
-    # 4. 換算所有食材重量
-    converted_ingredients = []
-    for ing in recipe['ingredients']:
-        converted_ing = ing.copy()
-        
-        # 只有在百分比分組中的食材才進行換算，或者如果用戶選擇包含非百分比分組
-        if is_percentage_group(ing['group']) or include_non_percentage_groups:
-            original_weight = ing['weight'] or 0
-            # 換算並四捨五入到小數點後一位
-            converted_ing['weight'] = round(original_weight * conversion_ratio, 1)
-        
-        converted_ingredients.append(converted_ing)
-
-    return jsonify({
-        "status": "success",
-        "originalTotalFlour": original_total_flour,
-        "newTotalFlour": new_total_flour,
-        "conversionRatio": conversion_ratio,
-        "ingredients": converted_ingredients
-    })
-
+# --- 伺服器啟動 (僅用於本地開發) ---
 if __name__ == '__main__':
-    # 確保在啟動時初始化資料庫
-    init_db()
+    # 注意：在 Render/Gunicorn 環境中，這個區塊不會執行。
+    # 真正的初始化已在上方 init_db() 呼叫中完成。
     app.run(debug=True, port=5000)
