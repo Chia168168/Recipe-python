@@ -141,43 +141,49 @@ def init_db():
 # 這一行會確保在應用程式啟動時，無論是使用 flask run 還是 gunicorn，都會執行初始化。
 init_db()
 
-
-# --- 資料轉換和讀取函數 (保持不變) ---
+# --- 資料轉換和讀取函數 (已修正 JSON 序列化問題) ---
 
 def get_all_recipes_data():
     """從資料庫讀取所有食譜資料並整理成前端需要的結構"""
     db = get_db()
     
-    # 讀取所有資料 (使用資料庫中的欄位名稱)
+    # 讀取所有資料
     df = pd.read_sql_query("SELECT * FROM recipes ORDER BY RecipeName, id", db)
 
     if df.empty:
         return []
 
+    # 按食譜名稱分組
     recipes_grouped = df.groupby('RecipeName')
+    
     recipes_list = []
 
     for name, group in recipes_grouped:
         first_row = group.iloc[0]
         
+        # 提取烘烤資訊 - 【關鍵修正：使用 int() 或 float() 確保轉換為標準 Python 類型】
         baking_info = {
-            'topHeat': first_row['UpperTemp'],
-            'bottomHeat': first_row['LowerTemp'],
-            'time': first_row['BakeTime'],
+            # 使用 pd.notna 檢查值是否為 NaN/None，並將其強制轉換為 int 或 None
+            'topHeat': int(first_row['UpperTemp']) if pd.notna(first_row['UpperTemp']) else None,
+            'bottomHeat': int(first_row['LowerTemp']) if pd.notna(first_row['LowerTemp']) else None,
+            'time': int(first_row['BakeTime']) if pd.notna(first_row['BakeTime']) else None,
             'convection': first_row['Convection'] == '是',
             'steam': first_row['Steam'] == '是',
         }
         
+        # 整理食材列表
         ingredients = []
         for _, row in group.iterrows():
             ingredients.append({
                 'group': row['IngredientGroup'],
                 'name': row['IngredientName'],
-                'weight': row['Weight_g'],
-                'percent': row['Percentage'], # 這裡已經是小數
+                # 確保 weight 和 percent 轉換為標準 Python float
+                'weight': float(row['Weight_g']) if pd.notna(row['Weight_g']) else None,
+                'percent': float(row['Percentage']) if pd.notna(row['Percentage']) else None, 
                 'desc': row['Description'],
             })
 
+        # 整理食譜物件
         recipe_obj = {
             'title': name,
             'steps': first_row['Steps'],
@@ -188,6 +194,7 @@ def get_all_recipes_data():
         recipes_list.append(recipe_obj)
         
     return recipes_list
+
 
 # --- 路由定義 (保持不變) ---
 
