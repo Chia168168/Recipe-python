@@ -581,10 +581,10 @@
 
 <script>
     // 儲存全域狀態
-    let ALL_RECIPES_DATA = []; // 儲存所有食譜的詳細數據
-    let CUSTOM_INGREDIENTS_DB = []; // 儲存自訂食材資料庫
+    let ALL_RECIPES_DATA = []; 
+    let CUSTOM_INGREDIENTS_DB = []; 
     let CURRENT_RECIPE_ID = null; // 用於修改食譜時追蹤食譜名稱
-    const API_BASE_URL = ''; // 相對於目前路徑，即 Flask 路由
+    const API_BASE_URL = ''; // 相對於目前路徑
     let CONVERSION_RECIPE_NAME = null; // 儲存當前正在換算的食譜名稱
 
     // 標準分組列表
@@ -593,52 +593,49 @@
     ];
 
     // =================================================================
-    // 核心 UI/API 互動函數
+    // 核心 UI/API 互動函數 (全部功能已補齊)
     // =================================================================
 
     document.addEventListener('DOMContentLoaded', () => {
-        loadRecipes(); // 頁面載入時預設載入食譜列表
         setupConversionToolListeners(); // 初始化換算工具的輸入事件
         switchTab('browse'); // 預設開啟瀏覽食譜分頁
-        // 確保管理頁籤有預設的食材行
-        resetForm(); 
+        resetForm(); // 確保管理頁籤有預設的食材行
     });
 
-    // --- 載入中指示器/通知函數 (與先前保持一致) ---
+    // --- 載入中指示器/通知函數 ---
 
     function showLoading(show) {
-        // 使用一個簡單的遮罩，需要您的 HTML 確保 #saveProgress 存在
         const overlay = document.getElementById('saveProgress'); 
         if (overlay) overlay.style.display = show ? 'block' : 'none';
     }
 
     function showNotification(message, type = 'success') {
         const container = document.getElementById('notificationContainer');
-        if (!container) return alert(message); // 如果沒有通知容器，就用 alert
+        if (!container) return alert(message);
         
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
-        // 使用簡單的 HTML 結構，假設樣式已定義
         notification.innerHTML = `<span class="notification-content">${message}</span><button class="notification-close" onclick="this.parentElement.remove()">&times;</button>`;
         container.prepend(notification);
         
-        setTimeout(() => notification.remove(), 4000); 
+        setTimeout(() => {
+            notification.classList.add('fade-out');
+            setTimeout(() => notification.remove(), 500); 
+        }, 3500);
     }
 
-    // --- 1. 頁籤切換 ---
+    // --- 1. 頁籤切換 (控制所有頁籤的點擊反應) ---
 
     function switchTab(tabId) {
-        // 隱藏所有內容，移除所有 active 狀態
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
 
-        // 顯示當前內容並設置 active 狀態
         const contentEl = document.getElementById(tabId + 'Tab');
         if (contentEl) contentEl.classList.add('active');
         const tabEl = document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`);
         if (tabEl) tabEl.classList.add('active');
 
-        // 根據切換的頁籤載入數據
+        // 根據切換的頁籤載入數據 (確保後端呼叫有反應)
         if (tabId === 'browse') {
             loadRecipes();
         } else if (tabId === 'stats') {
@@ -646,24 +643,226 @@
         } else if (tabId === 'settings') {
             loadIngredientsDB();
         } else if (tabId === 'manage') {
-            calculateHydration(); // 確保切換回來時計算含水率
+             // 確保在切換到管理頁籤時，如果沒有食材行，會新增一個
+            if (document.getElementById('ingredients-container').children.length === 0) {
+                 resetForm(); 
+            }
+            calculateHydration();
         }
     }
     
-    // --- 2. 食譜管理 (新增/修改) 函數 (保持一致) ---
-    
-    // ... (getFormData, resetForm, loadRecipeToForm, saveRecipe, addNewGroup, 
-    // removeGroup, addIngredientRow, calculateHydration 函數與先前版本保持一致) ...
-    // 【為避免重複冗長，此處省略，請確保您的 index.html 包含這些函數】
+    // --- 2. 食譜管理 (CRUD) 函數 (確保所有輸入/按鈕有反應) ---
 
-    // 完整的 calculateHydration 函數 (重要，請確保在您的 index.html 中)
+    function getFormData() {
+        const title = document.getElementById('title').value.trim();
+        const steps = document.getElementById('steps').value.trim();
+        const topHeat = parseInt(document.getElementById('top-heat').value) || 0;
+        const bottomHeat = parseInt(document.getElementById('bottom-heat').value) || 0;
+        const bakingTime = parseInt(document.getElementById('baking-time').value) || 0;
+        const convection = document.getElementById('convection').checked;
+        const steam = document.getElementById('steam').checked;
+
+        const bakingInfo = { topHeat, bottomHeat, time: bakingTime, convection, steam };
+        
+        const ingredients = [];
+        document.querySelectorAll('.ingredient-grid').forEach(grid => {
+            const group = grid.querySelector('select[name="group"]').value;
+            const name = grid.querySelector('input[name="name"]').value;
+            const weight = parseFloat(grid.querySelector('input[name="weight"]').value) || 0;
+            const percent = grid.querySelector('input[name="percent"]').value;
+            const desc = grid.querySelector('input[name="desc"]').value;
+            
+            if (name && weight > 0) {
+                ingredients.push({ group, name, weight, percent, desc });
+            }
+        });
+        
+        return { title, ingredients, steps, bakingInfo };
+    }
+
+    function resetForm() {
+        document.getElementById('title').value = '';
+        document.getElementById('steps').value = '';
+        document.getElementById('top-heat').value = 200;
+        document.getElementById('bottom-heat').value = 200;
+        document.getElementById('baking-time').value = 30;
+        document.getElementById('convection').checked = false;
+        document.getElementById('steam').checked = false;
+        document.getElementById('ingredients-container').innerHTML = '';
+        
+        document.getElementById('saveBtn').innerHTML = '<i class="fas fa-save"></i> 儲存食譜';
+        document.getElementById('saveBtn').onclick = () => saveRecipe(false); // 確保綁定 saveRecipe(false)
+        CURRENT_RECIPE_ID = null; 
+        
+        // 確保初始狀態有一個分組和一個食材行
+        addNewGroup('主麵團');
+        addIngredientRow();
+        calculateHydration(); 
+    }
+    
+    function loadRecipeToForm(recipe) {
+        switchTab('manage'); 
+        if (!recipe) return;
+
+        document.getElementById('title').value = recipe.title;
+        document.getElementById('steps').value = recipe.steps;
+        document.getElementById('top-heat').value = recipe.baking.topHeat || 0;
+        document.getElementById('bottom-heat').value = recipe.baking.bottomHeat || 0;
+        document.getElementById('baking-time').value = recipe.baking.time || 0;
+        document.getElementById('convection').checked = recipe.baking.convection;
+        document.getElementById('steam').checked = recipe.baking.steam;
+        
+        document.getElementById('ingredients-container').innerHTML = ''; 
+        
+        let currentGroup = '';
+        recipe.ingredients.forEach(ing => {
+            // 由於分組是通過一個隱藏的 select 標籤來實現的，我們需要重新建立分組標頭
+            if (ing.group && ing.group !== currentGroup) {
+                addNewGroup(ing.group);
+                currentGroup = ing.group;
+            }
+            // percent 是小數，需要轉換回百分比字串
+            const percentStr = ing.percent ? (ing.percent * 100).toFixed(2) + '%' : '';
+            addIngredientRow({...ing, percent: percentStr});
+        });
+        
+        document.getElementById('saveBtn').innerHTML = '<i class="fas fa-edit"></i> 更新食譜';
+        document.getElementById('saveBtn').onclick = () => saveRecipe(true); // 確保綁定 saveRecipe(true)
+        CURRENT_RECIPE_ID = recipe.title; 
+        
+        calculateHydration(); 
+    }
+
+    async function saveRecipe(isUpdate = false) {
+        const formData = getFormData();
+        
+        if (!formData.title) {
+            showNotification('食譜名稱不可為空！', 'error');
+            return;
+        }
+        if (formData.ingredients.length === 0) {
+            showNotification('請至少添加一項食材！', 'error');
+            return;
+        }
+
+        showLoading(true);
+
+        const payload = {
+            title: formData.title,
+            ingredients: formData.ingredients,
+            steps: formData.steps,
+            bakingInfo: formData.bakingInfo,
+            isUpdate: isUpdate,
+        };
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/save_recipe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.message || (isUpdate ? '更新失敗' : '新增失敗'));
+            }
+
+            showNotification(result.message, 'success');
+            resetForm(); 
+            loadRecipes(); 
+            
+        } catch (error) {
+            console.error('儲存食譜失敗:', error);
+            showNotification('儲存食譜失敗: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+    
+    // --- 食材行/分組動態管理 ---
+
+    function addNewGroup(groupName = '新分組') {
+        const container = document.getElementById('ingredients-container');
+        const defaultGroupName = groupName || '新分組';
+        
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'ingredient-group-header';
+        groupHeader.innerHTML = `
+            <span>分組: ${defaultGroupName}</span>
+            <button class="btn btn-sm btn-danger" onclick="removeGroup(this)"><i class="fas fa-trash"></i> 移除分組</button>
+        `;
+        groupHeader.setAttribute('data-group', defaultGroupName);
+        container.appendChild(groupHeader);
+    }
+
+    function removeGroup(buttonElement) {
+        if (!confirm("確定要移除此分組及其所有食材嗎？")) return;
+        
+        const groupHeader = buttonElement.closest('.ingredient-group-header');
+        const groupName = groupHeader.getAttribute('data-group');
+        
+        // 移除所有屬於此分組的食材行
+        document.querySelectorAll('.ingredient-grid').forEach(grid => {
+            if (grid.querySelector('select[name="group"]').value === groupName) {
+                grid.remove();
+            }
+        });
+        
+        groupHeader.remove();
+        calculateHydration();
+    }
+    
+    function addIngredientRow(data = {}) {
+        const container = document.getElementById('ingredients-container');
+        const groupElements = container.querySelectorAll('.ingredient-group-header');
+        
+        // 確保至少有一個分組
+        if (groupElements.length === 0) {
+            addNewGroup();
+            groupElements = container.querySelectorAll('.ingredient-group-header');
+        }
+        
+        // 找到最後一個分組名稱
+        const lastGroup = groupElements[groupElements.length - 1].getAttribute('data-group');
+        
+        const row = document.createElement('div');
+        row.className = 'ingredient-grid';
+        
+        // 確保選擇框的選項被正確選中
+        const selectedGroup = data.group || lastGroup;
+        const groupOptions = STANDARD_GROUPS.map(g => 
+            `<option value="${g}" ${g === selectedGroup ? 'selected' : ''}>${g}</option>`
+        ).join('');
+
+        row.innerHTML = `
+            <select name="group" onchange="calculateHydration()">
+                ${groupOptions}
+            </select>
+            <input type="text" name="name" placeholder="食材名稱 (麵粉、水等)" value="${data.name || ''}" oninput="calculateHydration()">
+            <input type="number" name="weight" placeholder="重量 (g)" value="${data.weight || ''}" step="0.1" min="0.1" oninput="calculateHydration()">
+            <input type="text" name="percent" placeholder="百分比 (%)" value="${data.percent || ''}">
+            <input type="text" name="desc" placeholder="說明/備註" value="${data.desc || ''}">
+            <button class="btn btn-sm btn-danger" onclick="this.closest('.ingredient-grid').remove(); calculateHydration();"><i class="fas fa-trash"></i></button>
+        `;
+        
+        // 將新行插入到最後一個分組標頭之後
+        const lastHeader = groupElements[groupElements.length - 1];
+        if (lastHeader) {
+            lastHeader.insertAdjacentElement('afterend', row);
+        } else {
+             container.appendChild(row); // 如果沒有標頭，直接添加到容器末尾
+        }
+        
+        calculateHydration();
+    }
+
     function calculateHydration() {
-        // 確保獲取所有食材的邏輯是正確的
         const ingredients = getFormData().ingredients; 
         let totalFlourWeight = 0;
         let totalLiquidWeight = 0;
         
-        const isFlour = (name) => name && name.includes('麵粉');
+        const isFlour = (name) => name && (name.includes('麵粉') || name.includes('粉'));
         const isLiquid = (name) => name && (name.includes('水') || name.includes('牛奶'));
         const isPercentageGroup = (group) => ['中種', '主麵團', '主面团', '中种'].includes(group);
 
@@ -693,10 +892,21 @@
         if (hydrationEl) {
              hydrationEl.textContent = `含水率: ${hydration.toFixed(2)}%`;
         }
+        
+        // 啟用/禁用換算工具按鈕 (在管理頁籤中)
+        const conversionToolBtn = document.getElementById('conversionToolBtn');
+        if (conversionToolBtn) {
+            if (totalFlourWeight > 0 && document.getElementById('title').value) {
+                conversionToolBtn.style.display = 'inline-flex';
+                conversionToolBtn.onclick = () => openConversionModal(document.getElementById('title').value);
+            } else {
+                conversionToolBtn.style.display = 'none';
+            }
+        }
     }
 
 
-    // --- 3. 瀏覽食譜函數 (已修復 populateFilterOptions 遺漏問題) ---
+    // --- 3. 瀏覽食譜函數 (所有過濾/排序/渲染操作) ---
 
     async function loadRecipes() {
         showLoading(true);
@@ -704,16 +914,14 @@
             const response = await fetch(`${API_BASE_URL}/get_recipes`);
             
             if (!response.ok) {
-                // 如果後端返回 500 等錯誤，response.json() 仍然會嘗試解析錯誤訊息
-                const errorResult = await response.json(); 
-                throw new Error(errorResult.message || `HTTP 錯誤: ${response.status}`);
+                const errorText = await response.text(); 
+                throw new Error(`載入失敗 (HTTP ${response.status}): ${errorText.slice(0, 100)}...`);
             }
 
             ALL_RECIPES_DATA = await response.json();
             
-            // 【修正點 1：現在會呼叫 filterRecipes，該函式會處理渲染】
+            // 確保所有瀏覽功能依賴的函式都被呼叫
             filterRecipes(); 
-            // 【修正點 2：補齊 populateFilterOptions 函式】
             populateFilterOptions(ALL_RECIPES_DATA); 
 
         } catch (error) {
@@ -725,12 +933,11 @@
         }
     }
     
-    // 【補齊遺漏的函式 1: 填充過濾選項】
     function populateFilterOptions(recipes) {
         const select = document.getElementById('recipeFilter');
+        if (!select) return;
         select.innerHTML = '<option value="all">所有食譜</option>';
         
-        // 從所有食譜中提取不重複的「分組」作為過濾選項
         const groups = new Set();
         recipes.forEach(recipe => {
             recipe.ingredients.forEach(ing => {
@@ -746,18 +953,15 @@
         });
     }
 
-    // 【補齊遺漏的函式 2: 過濾和排序】
     function filterRecipes() {
-        const searchInput = document.getElementById('searchBar').value.toLowerCase();
-        const filterGroup = document.getElementById('recipeFilter').value;
-        const sortKey = document.getElementById('sortSelect').value;
+        const searchInput = document.getElementById('searchBar')?.value.toLowerCase() || '';
+        const filterGroup = document.getElementById('recipeFilter')?.value || 'all';
+        const sortKey = document.getElementById('sortSelect')?.value || 'date_desc';
 
         let filtered = ALL_RECIPES_DATA.filter(recipe => {
-            // 搜尋條件：食譜標題或步驟
             const matchesSearch = recipe.title.toLowerCase().includes(searchInput) || 
                                   (recipe.steps && recipe.steps.toLowerCase().includes(searchInput));
             
-            // 過濾條件：分組
             const matchesFilter = filterGroup === 'all' || 
                                   recipe.ingredients.some(ing => ing.group === filterGroup);
                                   
@@ -776,29 +980,299 @@
         renderRecipesList(filtered);
     }
     
-    // 將 filterRecipes 綁定到輸入和選擇事件上
+    // 將 filterRecipes 綁定到事件上 (確保搜尋/過濾/排序有反應)
     document.getElementById('searchBar')?.addEventListener('input', filterRecipes);
     document.getElementById('recipeFilter')?.addEventListener('change', filterRecipes);
     document.getElementById('sortSelect')?.addEventListener('change', filterRecipes);
 
+    function renderRecipesList(recipes) {
+        // [此處內容與您上次收到的完全一致，確保顯示食譜列表]
+        const listContainer = document.getElementById('recipes-list');
+        listContainer.innerHTML = ''; 
+        if (recipes.length === 0) {
+            listContainer.innerHTML = `<div class="empty-state"><i class="fas fa-book-open"></i><h3>尚無食譜資料</h3><p>請前往「食譜管理」新增您的第一個食譜。</p></div>`;
+            return;
+        }
 
-    // --- 4. 其他函數 (保持一致) ---
+        recipes.forEach(recipe => {
+            const card = document.createElement('div');
+            card.className = 'recipe-card';
+            // 使用 find 確保能找到完整的食譜物件給 loadRecipeToForm
+            const editOnClick = `loadRecipeToForm(ALL_RECIPES_DATA.find(r => r.title === '${recipe.title.replace(/'/g, "\\'")}'))`;
+            const deleteOnClick = `deleteRecipe('${recipe.title.replace(/'/g, "\\'")}')`;
+            const convertOnClick = `openConversionModal('${recipe.title.replace(/'/g, "\\'")}')`;
+            
+            card.innerHTML = `
+                <div class="recipe-header">
+                    <h3 class="recipe-title">${recipe.title}</h3>
+                    <div class="action-buttons">
+                        <button class="btn btn-sm btn-info" onclick="${editOnClick}"><i class="fas fa-edit"></i> 修改</button>
+                        <button class="btn btn-sm btn-danger" onclick="${deleteOnClick}"><i class="fas fa-trash"></i> 刪除</button>
+                        <button class="btn btn-sm btn-warning" onclick="${convertOnClick}"><i class="fas fa-calculator"></i> 換算</button>
+                    </div>
+                </div>
+                <div class="recipe-meta">建立時間: ${new Date(recipe.timestamp).toLocaleString()}</div>
+                
+                <div class="baking-container">
+                    <strong>烘烤設定:</strong> 
+                    上火 ${recipe.baking.topHeat || 0}°C / 下火 ${recipe.baking.bottomHeat || 0}°C (${recipe.baking.time || 0} min) |
+                    旋風: ${recipe.baking.convection ? '是' : '否'} | 蒸汽: ${recipe.baking.steam ? '是' : '否'}
+                </div>
+
+                <table class="ingredient-table">
+                    <thead><tr><th>分組</th><th>食材</th><th>重量 (g)</th><th>百分比</th><th>說明</th></tr></thead>
+                    <tbody>
+                        ${recipe.ingredients.map(ing => `
+                            <tr>
+                                <td>${ing.group || '-'}</td>
+                                <td>${ing.name || '-'}</td>
+                                <td>${ing.weight ? parseFloat(ing.weight).toFixed(1) : '-'}</td>
+                                <td>${ing.percent ? (ing.percent * 100).toFixed(2) + '%' : '-'}</td>
+                                <td>${ing.desc || ''}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                
+                <div class="steps-container">
+                    <strong>製作步驟:</strong>
+                    <pre>${recipe.steps || '無步驟說明'}</pre>
+                </div>
+            `;
+            listContainer.appendChild(card);
+        });
+    }
     
-    // ... (renderRecipesList, deleteRecipe, loadStatistics, loadIngredientsDB, 
-    // renderIngredientsDB, saveCustomIngredient, editCustomIngredient, deleteCustomIngredient 
-    // 以及所有與換算工具相關的函數 openConversionModal, runConversionWrapper 等) ...
-    // 【請確保這些函數也都在您的 index.html 的 <script> 標籤內】
+    // 【刪除按鈕功能】
+    async function deleteRecipe(recipeName) {
+        if (!confirm(`確定要永久刪除食譜「${recipeName}」嗎？此操作無法恢復！`)) return;
+        
+        showLoading(true);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/delete_recipe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipeName: recipeName })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.message || '刪除失敗');
+            }
+
+            showNotification(result.message, 'success');
+            loadRecipes(); 
+            
+        } catch (error) {
+            console.error('刪除食譜失敗:', error);
+            showNotification('刪除食譜失敗: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
 
 
-    // 完整的 openConversionModal 函數 (重要，用於瀏覽頁籤的換算按鈕)
+    // --- 4. 統計資料函數 (確保統計頁籤有反應) ---
+
+    async function loadStatistics() {
+        showLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/get_stats`);
+            
+            if (!response.ok) {
+                const errorResult = await response.json();
+                throw new Error(errorResult.message || `HTTP 錯誤: ${response.status}`);
+            }
+
+            const stats = await response.json();
+            
+            // 更新 UI (確保 HTML 中有這些 ID)
+            document.getElementById('total-recipes').textContent = stats.totalRecipes;
+            document.getElementById('total-ingredients').textContent = stats.totalIngredients;
+            document.getElementById('avg-weight').textContent = stats.avgWeight.toFixed(1) + ' g';
+            document.getElementById('latest-recipe').textContent = stats.latestRecipe;
+
+        } catch (error) {
+            console.error('載入統計數據失敗:', error);
+            showNotification('載入統計數據失敗: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    // --- 5. 設定 (自訂食材資料庫) 函數 (確保設定頁籤有反應) ---
+
+    async function loadIngredientsDB() {
+        showLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/get_ingredients_db`);
+            
+            if (!response.ok) {
+                 const errorResult = await response.json();
+                throw new Error(errorResult.message || `HTTP 錯誤: ${response.status}`);
+            }
+
+            CUSTOM_INGREDIENTS_DB = await response.json();
+            renderIngredientsDB();
+            calculateHydration(); // 更新管理頁籤的含水率計算
+            
+
+        } catch (error) {
+            console.error('載入自訂食材資料庫失敗:', error);
+            showNotification('載入自訂食材資料庫失敗: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    function renderIngredientsDB() {
+        const listContainer = document.getElementById('custom-ingredients-list-container');
+        if (!listContainer) return;
+        
+        listContainer.innerHTML = '<h4>已儲存的自訂食材</h4><ul>' + 
+            CUSTOM_INGREDIENTS_DB.map(ing => `
+                <li data-name="${ing.name.replace(/'/g, "\\'").replace(/"/g, '\\"')}">
+                    <span class="ingredient-info">
+                        <strong>${ing.name}</strong> 
+                        (含水率: ${parseFloat(ing.hydration).toFixed(1)}%)
+                    </span>
+                    <div class="ingredient-actions">
+                        <button class="btn btn-sm btn-warning" onclick="editCustomIngredient('${ing.name.replace(/'/g, "\\'").replace(/"/g, '\\"')}', ${ing.hydration})"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteCustomIngredient('${ing.name.replace(/'/g, "\\'").replace(/"/g, '\\"')}')"><i class="fas fa-trash"></i></button>
+                    </div>
+                </li>
+            `).join('') + '</ul>';
+    }
+
+    async function saveCustomIngredient() {
+        const name = document.getElementById('custom-ingredient-name').value.trim();
+        const hydration = parseFloat(document.getElementById('custom-ingredient-hydration').value);
+        
+        if (!name || isNaN(hydration) || hydration < 0 || hydration > 100) {
+            showNotification('請輸入有效的食材名稱和 0% 到 100% 的含水率', 'warning');
+            return;
+        }
+
+        showLoading(true);
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/save_ingredient_db`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, hydration: hydration })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                 const errorResult = await response.json();
+                throw new Error(errorResult.message || '儲存失敗');
+            }
+
+            showNotification(result.message, 'success');
+            document.getElementById('custom-ingredient-name').value = '';
+            document.getElementById('custom-ingredient-hydration').value = '';
+            loadIngredientsDB(); // 重新載入列表
+            
+        } catch (error) {
+            console.error('儲存自訂食材失敗:', error);
+            showNotification('儲存自訂食材失敗: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+    
+    function editCustomIngredient(name, hydration) {
+        document.getElementById('custom-ingredient-name').value = name;
+        document.getElementById('custom-ingredient-hydration').value = hydration;
+        document.getElementById('custom-ingredient-name').focus();
+        showNotification(`正在編輯食材: ${name}`, 'info');
+    }
+
+    async function deleteCustomIngredient(name) {
+        if (!confirm(`確定要刪除自訂食材「${name}」嗎？`)) return;
+        
+        showLoading(true);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/delete_ingredient_db`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                 const errorResult = await response.json();
+                throw new Error(errorResult.message || '刪除失敗');
+            }
+
+            showNotification(result.message, 'success');
+            loadIngredientsDB(); 
+            
+        } catch (error) {
+            console.error('刪除自訂食材失敗:', error);
+            showNotification('刪除自訂食材失敗: ' + error.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+
+
+    // --- 6. 智能換算工具 (確保換算功能有反應) ---
+
+    function setupConversionToolListeners() {
+        const modal = document.getElementById('conversionModal');
+        if (!modal) return;
+        
+        // 綁定倍數按鈕事件
+        modal.querySelectorAll('.conversion-option-btn').forEach(btn => {
+            btn.onclick = function() {
+                modal.querySelectorAll('.conversion-option-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                const ratio = parseFloat(this.getAttribute('data-ratio'));
+                const originalFlour = parseFloat(document.getElementById('conversionOriginalFlour').value) || 0;
+                
+                if (originalFlour > 0) {
+                     document.getElementById('conversionNewFlour').value = (originalFlour * ratio).toFixed(1);
+                     document.getElementById('conversionRatio').value = ratio.toFixed(3);
+                }
+            };
+        });
+
+        // 綁定新麵粉重量輸入事件
+        document.getElementById('conversionNewFlour').addEventListener('input', function() {
+            modal.querySelectorAll('.conversion-option-btn').forEach(b => b.classList.remove('active'));
+            
+            const originalFlour = parseFloat(document.getElementById('conversionOriginalFlour').value) || 0;
+            const newFlour = parseFloat(this.value) || 0;
+            
+            if (newFlour > 0 && originalFlour > 0) {
+              const ratio = newFlour / originalFlour;
+              document.getElementById('conversionRatio').value = ratio.toFixed(3);
+            } else {
+              document.getElementById('conversionRatio').value = '0.000';
+            }
+        });
+        
+        // 綁定執行換算按鈕
+        document.getElementById('conversionRunBtn').onclick = runConversionWrapper;
+        
+        // 綁定關閉按鈕
+        modal.querySelector('.close-btn').onclick = closeConversionModal;
+    }
+
     function openConversionModal(recipeName) {
-        // 找到食譜數據
         const recipe = ALL_RECIPES_DATA.find(r => r.title === recipeName);
         if (!recipe) return showNotification("找不到食譜數據！", 'error');
 
-        // 計算原始麵粉總量
+        // 計算原始麵粉總量 (只計算百分比分組的麵粉)
         let totalFlourWeight = 0;
-        const isFlour = (name) => name && name.includes('麵粉');
+        const isFlour = (name) => name && (name.includes('麵粉') || name.includes('粉'));
         const isPercentageGroup = (group) => ['中種', '主麵團', '主面团', '中种'].includes(group);
 
         recipe.ingredients.forEach(ing => {
@@ -807,19 +1281,21 @@
             }
         });
 
-        // 設置換算工具的 UI 狀態 (需要您 HTML 中有對應的元素 ID)
         CONVERSION_RECIPE_NAME = recipeName;
+        
+        // 重置模態窗口
         document.getElementById('conversionModalTitle').textContent = `換算食譜：${recipeName}`;
         document.getElementById('conversionOriginalFlour').value = totalFlourWeight.toFixed(1);
         document.getElementById('conversionNewFlour').value = totalFlourWeight.toFixed(1);
         document.getElementById('conversionRatio').value = '1.000';
         document.getElementById('conversionResults').innerHTML = '';
-        
-        // 顯示模態窗口 (假設您的 HTML 中有 #conversionModal)
+        document.getElementById('conversionIncludeNonPercentageGroups').checked = false;
+        document.querySelectorAll('.conversion-option-btn').forEach(b => b.classList.remove('active'));
+
+
         const modal = document.getElementById('conversionModal');
         if (modal) modal.style.display = 'flex';
         
-        // 如果沒有麵粉，禁用換算
         if (totalFlourWeight <= 0) {
              showNotification("此食譜沒有用於換算的麵粉，無法使用換算工具。", 'warning');
              document.getElementById('conversionRunBtn').disabled = true;
@@ -828,18 +1304,22 @@
         }
     }
     
-    // 假設您的 HTML 中有 runConversionWrapper，它會呼叫 runConversion
+    function closeConversionModal() {
+        const modal = document.getElementById('conversionModal');
+        if (modal) modal.style.display = 'none';
+        CONVERSION_RECIPE_NAME = null;
+    }
+
     async function runConversionWrapper() {
         const recipeName = CONVERSION_RECIPE_NAME;
         const newTotalFlour = parseFloat(document.getElementById('conversionNewFlour').value);
         const includeNonPercentageGroups = document.getElementById('conversionIncludeNonPercentageGroups').checked;
         
         if (!recipeName || isNaN(newTotalFlour) || newTotalFlour <= 0) {
-            alert("請輸入有效的目標麵粉總量 (大於 0)。");
+            showNotification("請輸入有效的目標麵粉總量 (大於 0)。", 'error');
             return;
         }
         
-        // 呼叫後端 API 執行換算
         showLoading(true);
 
         try {
@@ -859,7 +1339,7 @@
                 throw new Error(result.message || '換算失敗');
             }
 
-            handleConversionResult(result); // 成功處理函數
+            handleConversionResult(result);
 
         } catch (error) {
             console.error('換算操作失敗:', error);
@@ -868,72 +1348,68 @@
             showLoading(false);
         }
     }
+    
+    function handleConversionResult(result) {
+        if (result.status === 'error') {
+            showNotification('換算失敗: ' + result.message, 'error');
+            return;
+        }
 
-// --- 核心渲染函數 ---
+        const container = document.getElementById('conversionResults');
+        if (!container) return;
+        
+        let html = '<h4>換算結果</h4>';
+        html += `<p>原始麵粉總量: ${result.originalTotalFlour.toFixed(1)} g</p>`;
+        html += `<p>目標麵粉總量: ${result.newTotalFlour.toFixed(1)} g</p>`;
+        html += `<p>換算比例: ${result.conversionRatio.toFixed(3)}</p>`;
+        
+        html += '<table class="ingredient-table result-table"><thead><tr><th>分組</th><th>食材</th><th>換算後重量 (g)</th></tr></thead><tbody>';
+        
+        result.ingredients.forEach(ing => {
+            html += `
+                <tr>
+                    <td>${ing.group || '-'}</td>
+                    <td>${ing.name || '-'}</td>
+                    <td>${ing.weight ? ing.weight.toFixed(1) : '—'}</td>
+                </tr>
+            `;
+        });
+        
+        html += '</tbody></table>';
+        
+        // 新增「套用至表單」按鈕
+        const applyBtn = `<button class="btn btn-success mt-3" onclick="applyConversionToForm(CONVERSION_RECIPE_NAME, ${JSON.stringify(result.ingredients.map(i => ({...i, percent: i.percent ? (i.percent * 100).toFixed(2) + '%' : ''})))})"><i class="fas fa-arrow-circle-up"></i> 套用至食譜管理</button>`;
+        
+        container.innerHTML = html + applyBtn;
+        showNotification('換算成功！請查看結果。', 'success');
+    }
+    
+    function applyConversionToForm(recipeName, convertedIngredients) {
+        closeConversionModal();
+        switchTab('manage');
+        
+        // 找到食譜的非食材信息 (步驟/烘烤設定)
+        const originalRecipe = ALL_RECIPES_DATA.find(r => r.title === recipeName);
+        if (!originalRecipe) return showNotification("找不到原始食譜數據！", 'error');
 
-function renderRecipesList(recipes) {
-    const listContainer = document.getElementById('recipes-list');
-    listContainer.innerHTML = ''; // 清空列表
-
-    if (recipes.length === 0) {
-        listContainer.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-book-open"></i>
-                <h3>尚無食譜資料</h3>
-                <p>請前往「食譜管理」新增您的第一個食譜。</p>
-            </div>
-        `;
-        return;
+        // 將換算結果載入到表單中 (這會覆蓋現有的食材)
+        loadRecipeToForm({
+            ...originalRecipe,
+            ingredients: convertedIngredients
+        });
+        
+        // 由於重量已經改變，將按鈕文本設置為“更新食譜”
+        document.getElementById('saveBtn').innerHTML = '<i class="fas fa-edit"></i> 更新食譜';
+        document.getElementById('saveBtn').onclick = () => saveRecipe(true);
+        CURRENT_RECIPE_ID = originalRecipe.title; 
+        
+        showNotification(`已將換算結果套用至食譜「${recipeName}」的表單，請檢查後點擊更新。`, 'info');
     }
 
-    recipes.forEach(recipe => {
-        const card = document.createElement('div');
-        card.className = 'recipe-card';
-        card.innerHTML = `
-            <div class="recipe-header">
-                <h3 class="recipe-title">${recipe.title}</h3>
-                <div class="action-buttons">
-                    <button class="btn btn-sm btn-info" onclick="loadRecipeToForm(ALL_RECIPES_DATA.find(r => r.title === '${recipe.title}'))"><i class="fas fa-edit"></i> 修改</button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteRecipe('${recipe.title}')"><i class="fas fa-trash"></i> 刪除</button>
-                    <button class="btn btn-sm btn-warning" onclick="openConversionModal('${recipe.title}')"><i class="fas fa-calculator"></i> 換算</button>
-                </div>
-            </div>
-            <div class="recipe-meta">建立時間: ${new Date(recipe.timestamp).toLocaleString()}</div>
-            
-            <div class="baking-container">
-                <strong>烘烤設定:</strong> 
-                上火 ${recipe.baking.topHeat}°C / 下火 ${recipe.baking.bottomHeat}°C (${recipe.baking.time} min) |
-                旋風: ${recipe.baking.convection ? '是' : '否'} | 蒸汽: ${recipe.baking.steam ? '是' : '否'}
-            </div>
-
-            <table class="ingredient-table">
-                <thead><tr><th>分組</th><th>食材</th><th>重量 (g)</th><th>百分比</th><th>說明</th></tr></thead>
-                <tbody>
-                    ${recipe.ingredients.map(ing => `
-                        <tr>
-                            <td>${ing.group || '-'}</td>
-                            <td>${ing.name || '-'}</td>
-                            <td>${ing.weight ? parseFloat(ing.weight).toFixed(1) : '-'}</td>
-                            <td>${ing.percent ? (ing.percent * 100).toFixed(2) + '%' : '-'}</td>
-                            <td>${ing.desc || ''}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-            
-            <div class="steps-container">
-                <strong>製作步驟:</strong>
-                <pre>${recipe.steps || '無步驟說明'}</pre>
-            </div>
-        `;
-        listContainer.appendChild(card);
-    });
-}
-
-    // 確保表單載入時至少有一個分組和一個食材行
-    window.addEventListener('load', resetForm); 
-    
+    // --- DOM 加載完成後初始化 ---
+    window.addEventListener('load', resetForm);
 </script>
+
 
 
 </body>
