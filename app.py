@@ -1,12 +1,11 @@
 import sqlite3
 import pandas as pd
-from flask import Flask, render_template, request, jsonify
-import os # <-- 新增：用於處理文件路徑
+from flask import Flask, render_template, request, jsonify, g
+import os
 
 app = Flask(__name__)
 
 # --- 檔案路徑設定：使用 os 模組建構絕對路徑 ---
-# 獲取 app.py 所在的絕對路徑
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # 資料庫與 CSV 檔案的路徑
@@ -14,90 +13,97 @@ DATABASE = os.path.join(BASE_DIR, 'recipes.db')
 RECIPES_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - 食譜.csv')
 INGREDIENTS_DB_CSV_FILE = os.path.join(BASE_DIR, '食譜資料.xlsx - Ingredients.csv')
 
-# --- 資料庫工具函式 ---
+# --- 資料庫連線管理 ---
 
-def get_db_connection():
-    """建立並返回資料庫連線"""
-    # check_same_thread=False 適用於多線程/多進程環境 (如 Gunicorn)
-    conn = sqlite3.connect(DATABASE, check_same_thread=False) 
-    conn.row_factory = sqlite3.Row  # 讓查詢結果以字典形式返回
-    return conn
+def get_db():
+    """在每個請求中獲取一個資料庫連線，如果不存在則創建。"""
+    if 'db' not in g:
+        # check_same_thread=False 適用於 Gunicorn 這種多線程/多進程環境
+        g.db = sqlite3.connect(DATABASE, check_same_thread=False)
+        g.db.row_factory = sqlite3.Row  # 讓查詢結果以字典形式返回
+    return g.db
+
+@app.teardown_appcontext
+def close_db(e=None):
+    """在請求結束時關閉資料庫連線。"""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+# --- 資料載入與初始化 ---
 
 def init_db_and_load_data():
-    """初始化資料庫並從 CSV 載入資料"""
-    conn = get_db_connection()
+    """初始化資料庫並從 CSV 載入資料 (只在應用程式啟動時運行一次)。"""
+    # 使用一個獨立的連線來執行初始化，不使用 g.db
+    conn = sqlite3.connect(DATABASE)
     
     try:
-        # --- 1. 建立 recipes 表格並載入食譜數據 ---
-        print("正在載入食譜數據...")
-        # 確保文件存在
+        print("正在檢查並載入食譜數據...")
+        
+        # 1. 載入食譜數據
         if not os.path.exists(RECIPES_CSV_FILE):
              raise FileNotFoundError(RECIPES_CSV_FILE)
 
         recipes_df = pd.read_csv(RECIPES_CSV_FILE)
-        
-        # 欄位清理：確保重量和百分比是浮點數
         recipes_df['重量 (g)'] = pd.to_numeric(recipes_df['重量 (g)'], errors='coerce').fillna(0)
         recipes_df['百分比'] = recipes_df['百分比'].astype(str).str.replace('%', '').str.strip()
         recipes_df['百分比'] = pd.to_numeric(recipes_df['百分比'], errors='coerce').fillna(0) / 100
         
+        # 使用 if_exists='replace' 確保每次啟動都重新載入最新的 CSV 數據
         recipes_df.to_sql('recipes', conn, if_exists='replace', index=False)
         print(f"成功載入 {len(recipes_df)} 筆食譜紀錄到 'recipes' 表。")
 
-        # --- 2. 建立 ingredients_db 表格並載入食材資料庫數據 ---
-        print("正在載入食材資料庫數據...")
+        # 2. 載入食材資料庫數據
         if not os.path.exists(INGREDIENTS_DB_CSV_FILE):
              raise FileNotFoundError(INGREDIENTS_DB_CSV_FILE)
 
         ingredients_df = pd.read_csv(INGREDIENTS_DB_CSV_FILE)
         ingredients_df['hydration'] = pd.to_numeric(ingredients_df['hydration'], errors='coerce').fillna(0)
-        
         ingredients_df.to_sql('ingredients_db', conn, if_exists='replace', index=False)
         print(f"成功載入 {len(ingredients_df)} 筆食材紀錄到 'ingredients_db' 表。")
         
     except FileNotFoundError as e:
-        # 錯誤訊息更明確地指出找不到哪個檔案
-        print(f"錯誤：找不到 CSV 檔案 - {e.filename}。請確認檔案已放置在專案根目錄。")
+        print(f"致命錯誤：找不到 CSV 檔案 - {e.filename}。請確認檔案已放置在專案根目錄。")
     except Exception as e:
         print(f"資料庫初始化或數據載入失敗: {e}")
     finally:
         conn.close()
 
-# 應用程式啟動時呼叫資料庫初始化
-with app.app_context():
+# 在應用程式啟動時運行一次，確保數據在所有工作進程啟動前準備好
+# 我們使用 app.before_first_request 或 app.cli.command 來處理 WSGI 環境
+# 在 Render/Gunicorn 環境中，最簡單且穩健的方式是直接調用它（因為 Gunicorn 的啟動模式）
+# 或者使用 Flask CLI command
+try:
     init_db_and_load_data()
+except Exception as e:
+    print(f"應用程式啟動資料載入失敗: {e}")
 
-# --- 數據查詢工具函式 (保持不變) ---
+
+# --- 數據查詢工具函式 (改用 get_db() 獲取連線) ---
 
 def get_recipe_list_from_db():
     """從資料庫獲取所有不重複的食譜名稱"""
-    conn = get_db_connection()
-    recipe_names = conn.execute("SELECT DISTINCT \"食譜名稱\" FROM recipes ORDER BY \"食譜名稱\"").fetchall()
-    conn.close()
+    db = get_db()
+    # 這裡必須使用雙引號來包住中文欄位名稱
+    recipe_names = db.execute("SELECT DISTINCT \"食譜名稱\" FROM recipes ORDER BY \"食譜名稱\"").fetchall()
     return [name[0] for name in recipe_names]
 
 def get_recipe_details_from_db(recipe_name):
     """根據食譜名稱從資料庫獲取所有食材行"""
-    conn = get_db_connection()
+    db = get_db()
     query = 'SELECT * FROM recipes WHERE "食譜名稱" = ?'
-    rows = conn.execute(query, (recipe_name,)).fetchall()
-    conn.close()
+    rows = db.execute(query, (recipe_name,)).fetchall()
     return [dict(row) for row in rows]
 
 # --- 核心邏輯 (保持不變) ---
 
 def is_flour_ingredient(name):
-    """判斷是否為麵粉類食材 (可根據需要調整關鍵字)"""
     return '麵粉' in name
 
 def is_percentage_group(group_name):
-    """判斷是否為百分比分組 (可根據需要調整關鍵字)"""
     return group_name in ['中種', '主麵團', '主面团', '中种']
 
 def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_groups):
-    """
-    執行食材重量換算的核心邏輯
-    """
     original_total_flour = 0
     for ing in recipe_rows:
         ing_name = ing.get('食材', '')
@@ -108,10 +114,7 @@ def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_gr
             original_total_flour += ing_weight
 
     if original_total_flour <= 0:
-        return { 
-            "status": "error", 
-            "message": "此食譜沒有麵粉食材或麵粉重量為0" 
-        }
+        return { "status": "error", "message": "此食譜沒有麵粉食材或麵粉重量為0" }
 
     conversion_ratio = new_total_flour / original_total_flour
 
@@ -139,18 +142,19 @@ def calculate_conversion(recipe_rows, new_total_flour, include_non_percentage_gr
 
 @app.route('/')
 def index():
-    """提供前端 HTML 頁面 (Flask 將在 'templates' 資料夾中尋找 index.html)"""
+    """提供前端 HTML 頁面"""
     return render_template('index.html')
-
-# ... (其他路由保持不變) ...
 
 @app.route('/get_recipe_list', methods=['GET'])
 def get_recipe_list():
+    """提供食譜名稱列表給前端"""
+    # 這裡會自動使用 get_db()
     recipe_names = get_recipe_list_from_db()
     return jsonify(recipe_names)
 
 @app.route('/load_recipe', methods=['POST'])
 def load_recipe():
+    """根據食譜名稱載入詳細數據"""
     data = request.json
     recipe_name = data.get('recipeName')
     
@@ -180,6 +184,7 @@ def load_recipe():
 
 @app.route('/calculate_conversion', methods=['POST'])
 def handle_calculate_conversion():
+    """處理前端的食材換算請求"""
     data = request.json
     
     recipe_name = data.get('recipeName')
@@ -205,8 +210,3 @@ def handle_calculate_conversion():
         return jsonify(result), 400
     
     return jsonify(result)
-
-# --- 啟動設定 ---
-# 註釋掉 if __name__ == '__main__': 區塊，因為 Render 會使用 Gunicorn 啟動
-# if __name__ == '__main__':
-#     app.run(host='0.0.0.0', port=5000, debug=True)
