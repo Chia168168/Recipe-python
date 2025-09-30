@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>TENG食譜管理系統 v3.1 (Python/Flask)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* 保持原有的所有樣式不變 */
+    :root {
+      --primary: #4a6fa5;
+      --primary-light: #6d8fc7;
+      --primary-dark: #2a4b7a;
+      --secondary: #6c757d;
+      --success: #28a745;
+      --danger: #dc3545;
+      --warning: #ffc107;
+      --info: #17a2b8;
+      --light: #f8f9fa;
+      --dark: #343a40;
+      --gray: #6c757d;
+      --light-gray: #e9ecef;
+      --card-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
+      --transition: all 0.3s ease;
+      --border-radius: 12px;
+      --font-family: "微軟正黑體", "Helvetica Neue", Arial, sans-serif;
+    }
+    
+    * { box-sizing: border-box; }
+    body {
+      font-family: var(--font-family);
+      background-color: var(--light-gray);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 25px;
+      border-radius: var(--border-radius);
+      box-shadow: var(--card-shadow);
+    }
+    
+    h1, h2 { color: var(--primary-dark); margin-top: 0; }
+    
+    /* 工具欄和選擇器樣式 */
+    .toolbar, .conversion-input-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+    
+    select, input[type="number"], .btn {
+      padding: 10px 15px;
+      border-radius: 8px;
+      border: 1px solid var(--gray);
+      transition: var(--transition);
+      font-size: 16px;
+    }
+    
+    select {
+      flex-grow: 1;
+      min-width: 200px;
+      background-color: white;
+    }
+    
+    .btn {
+      cursor: pointer;
+      font-weight: bold;
+      text-align: center;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    
+    .btn-primary {
+      background-color: var(--primary);
+      color: white;
+      border-color: var(--primary-dark);
+    }
+    .btn-primary:hover {
+      background-color: var(--primary-dark);
+    }
+
+    .btn-warning {
+      background-color: var(--warning);
+      color: var(--dark);
+      border-color: var(--warning);
+    }
+    .btn-warning:hover {
+      background-color: #ffda6a;
+    }
+    
+    /* 換算工具樣式 */
+    #conversionTool {
+      background-color: var(--light);
+      padding: 15px;
+      border-radius: var(--border-radius);
+      margin-top: 20px;
+      border: 1px solid #ddd;
+    }
+    
+    .conversion-input-group label {
+      font-weight: bold;
+      color: var(--dark);
+      margin-right: 5px;
+      min-width: 100px;
+    }
+    
+    .conversion-option-btn {
+      background-color: #f0f0f0;
+      color: var(--dark);
+      border: 1px solid #ccc;
+      padding: 5px 10px;
+      font-size: 14px;
+    }
+    
+    .conversion-option-btn.active {
+      background-color: var(--info);
+      color: white;
+      border-color: var(--info);
+    }
+    
+    /* 食譜詳情和表格樣式 */
+    #recipeDetail {
+      margin-top: 20px;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin-top: 15px;
+      background-color: white;
+    }
+    
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--light-gray);
+    }
+    
+    th {
+      background-color: var(--primary-light);
+      color: white;
+      font-weight: bold;
+    }
+    
+    tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    
+    .recipe-info-card {
+      padding: 15px;
+      background-color: var(--light);
+      border-radius: 8px;
+      margin-bottom: 15px;
+      border-left: 5px solid var(--primary);
+    }
+    .recipe-info-card p {
+      margin: 5px 0;
+    }
+    
+    /* 步驟和備註區域 */
+    .details-section {
+      display: flex;
+      gap: 20px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .details-box {
+      flex: 1;
+      min-width: 300px;
+      background-color: var(--light);
+      padding: 15px;
+      border-radius: var(--border-radius);
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    }
+    
+    .details-box h3 {
+      color: var(--primary);
+      border-bottom: 2px solid var(--primary-light);
+      padding-bottom: 5px;
+    }
+    
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: var(--font-family);
+      margin: 0;
+    }
+
+    /* 載入指示器 */
+    #loadingIndicator {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        z-index: 1000;
+        text-align: center;
+        padding-top: 20%;
+        font-size: 24px;
+        color: var(--primary-dark);
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    .spinner {
+        border: 4px solid rgba(0, 0, 0, .1);
+        border-left-color: var(--primary);
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        animation: spin 1s linear infinite;
+        margin-bottom: 10px;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    
+    /* 換算結果表格樣式 */
+    .conversion-results-table {
+        margin-top: 20px;
+        border: 2px solid var(--primary);
+        border-radius: var(--border-radius);
+        overflow: hidden;
+    }
+
+  </style>
+</head>
+<body>
+<div class="container">
+    <h1>TENG食譜管理系統</h1>
+    
+    <div id="loadingIndicator">
+        <div class="spinner"></div>
+        載入中...
+    </div>
+
+    <div class="toolbar">
+        <label for="recipeList" style="font-weight: bold;">選擇食譜:</label>
+        <select id="recipeList" onchange="loadRecipe(this.value)">
+            <option value="">-- 請選擇食譜 --</option>
+        </select>
+        <button id="toggleConversionBtn" class="btn btn-warning" onclick="toggleConversionTool()">
+            <i class="fas fa-calculator"></i> 顯示換算工具
+        </button>
+    </div>
+
+    <div id="conversionTool" style="display:none;">
+        <h2>食譜換算工具</h2>
+        <div class="conversion-info-card recipe-info-card">
+            <p><strong><i class="fas fa-info-circle"></i> 換算說明：</strong> 本工具將根據 **[麵粉總量換算]** 的比例，調整所有 **[百分比分組]** (如中種、主麵團) 中的食材重量。</p>
+        </div>
+
+        <div class="conversion-input-group">
+            <label>原始總麵粉 (g):</label>
+            <input type="number" id="originalFlour" value="0" readonly title="此數值為系統根據食譜自動計算的麵粉總量">
+        </div>
+
+        <div class="conversion-input-group">
+            <label>目標總麵粉 (g):</label>
+            <input type="number" id="newFlour" value="0" placeholder="輸入新的麵粉總量">
+            
+            <button class="conversion-option-btn" data-ratio="0.5">x 0.5</button>
+            <button class="conversion-option-btn" data-ratio="0.75">x 0.75</button>
+            <button class="conversion-option-btn" data-ratio="1.25">x 1.25</button>
+            <button class="conversion-option-btn" data-ratio="1.5">x 1.5</button>
+            <button class="conversion-option-btn" data-ratio="2.0">x 2</button>
+        </div>
+
+        <div class="conversion-input-group">
+            <label>換算比例:</label>
+            <input type="number" id="conversionRatio" value="1.000" readonly>
+            <label for="includeNonPercentageGroups" style="min-width: unset;">
+                <input type="checkbox" id="includeNonPercentageGroups"> 包含非百分比分組食材
+            </label>
+            <button class="btn btn-primary" onclick="runConversionWrapper()">
+                <i class="fas fa-redo-alt"></i> 執行換算
+            </button>
+        </div>
+        
+        <div id="conversionResults"></div>
+    </div>
+
+    <div id="recipeDetail">
+        <h2 id="recipeNameTitle"></h2>
+        <div id="bakingInfoCard" class="recipe-info-card" style="display:none;">
+            </div>
+
+        <table id="ingredientsTable">
+            <thead>
+                <tr>
+                    <th>分組</th>
+                    <th>食材</th>
+                    <th>重量 (g)</th>
+                    <th>百分比</th>
+                    <th>說明</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+
+        <div class="details-section">
+            <div class="details-box">
+                <h3><i class="fas fa-clipboard-list"></i> 步驟</h3>
+                <pre id="recipeSteps"></pre>
+            </div>
+            <div class="details-box">
+                <h3><i class="fas fa-comment-dots"></i> 備註 (第一行說明)</h3>
+                <pre id="recipeNotes"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // =================================================================
+    // 核心 API 互動函數 (已從 google.script.run 轉換為 fetch)
+    // =================================================================
+    
+    // 應用程式啟動時載入食譜列表
+    document.addEventListener('DOMContentLoaded', loadRecipeList);
+    
+    // --- 1. 載入食譜列表 ---
+    async function loadRecipeList() {
+        showLoading(true, "載入食譜列表...");
+        try {
+            const response = await fetch('/get_recipe_list');
+            
+            if (!response.ok) {
+                throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+            }
+
+            const recipeNames = await response.json();
+            populateRecipeList(recipeNames); 
+        } catch (error) {
+            console.error('載入食譜列表失敗:', error);
+            alert('載入食譜列表失敗，請檢查伺服器連線 (Flask 後端)。');
+        } finally {
+            showLoading(false);
+        }
+    }
+    
+    function populateRecipeList(recipeNames) {
+        const select = document.getElementById('recipeList');
+        // 清空舊選項，保留預設選項
+        select.innerHTML = '<option value="">-- 請選擇食譜 --</option>';
+        
+        recipeNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        });
+        
+        document.getElementById('recipeDetail').style.display = 'none';
+        document.getElementById('conversionTool').style.display = 'none';
+        updateConversionToolButton();
+    }
+    
+    // --- 2. 載入單一食譜 ---
+    async function loadRecipe(recipeName) {
+        if (!recipeName) {
+            document.getElementById('recipeDetail').style.display = 'none';
+            document.getElementById('conversionTool').style.display = 'none';
+            updateConversionToolButton();
+            return;
+        }
+
+        showLoading(true, `載入食譜 ${recipeName}...`);
+        document.getElementById('conversionResults').innerHTML = ''; // 清空上次換算結果
+
+        try {
+            const response = await fetch('/load_recipe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipeName: recipeName })
+            });
+            
+            const result = await response.json();
+            
+            if (!response.ok) {
+                 // HTTP 狀態碼不是 2xx，但伺服器返回了 JSON 錯誤訊息
+                throw new Error(result.message || '載入食譜失敗');
+            }
+            
+            renderRecipeDetail(result); // 成功處理函數
+
+        } catch (error) {
+            console.error('載入食譜失敗:', error);
+            alert('載入食譜失敗: ' + error.message);
+        } finally {
+            showLoading(false);
+        }
+    }
+    
+    function renderRecipeDetail(result) {
+        const recipeName = document.getElementById('recipeList').value;
+        const ingredients = result.ingredients;
+        const bakingInfo = result.bakingInfo;
+        
+        // 顯示食譜標題
+        document.getElementById('recipeNameTitle').textContent = recipeName;
+
+        // 顯示食譜詳情區域
+        document.getElementById('recipeDetail').style.display = 'block';
+
+        // 渲染食材表格
+        const tbody = document.querySelector('#ingredientsTable tbody');
+        tbody.innerHTML = '';
+        
+        // 找出第一個食譜的步驟和備註 (假設所有行的步驟和備註相同)
+        const firstRow = ingredients[0] || {};
+        const steps = firstRow['步驟'] || '無步驟說明';
+        const notes = firstRow['說明'] || '無備註說明';
+        document.getElementById('recipeSteps').textContent = steps;
+        document.getElementById('recipeNotes').textContent = notes;
+
+        let totalFlourWeight = 0;
+        let mainRecipeSteps = '';
+
+        ingredients.forEach(ing => {
+            const row = tbody.insertRow();
+            
+            // 由於 Python 後端已將百分比轉換為小數，這裡顯示時需要轉換為百分比字符串
+            const percentageStr = (ing['百分比'] !== undefined && ing['百分比'] !== null) 
+                                ? (ing['百分比'] * 100).toFixed(2) + '%' 
+                                : '-';
+
+            // 確保重量為數字，並保留一位小數
+            const weight = parseFloat(ing['重量 (g)']).toFixed(1);
+
+            // 檢查是否為麵粉且為百分比分組 (與後端邏輯一致)
+            const isFlour = ing['食材'].includes('麵粉');
+            const isPercentageGroup = ['中種', '主麵團', '主面团', '中种'].includes(ing['分組']);
+            
+            if (isFlour && isPercentageGroup) {
+                totalFlourWeight += parseFloat(weight);
+            }
+
+            row.insertCell(0).textContent = ing['分組'] || '-';
+            row.insertCell(1).textContent = ing['食材'] || '-';
+            row.insertCell(2).textContent = weight; // 換算後的重量
+            row.insertCell(3).textContent = percentageStr; // 百分比
+            row.insertCell(4).textContent = ing['說明'] || '';
+            
+            // 為麵粉行添加樣式，方便識別
+            if (isFlour) {
+                row.style.fontWeight = 'bold';
+            }
+        });
+
+        // 設置原始總麵粉量到換算工具
+        document.getElementById('originalFlour').value = totalFlourWeight.toFixed(1);
+        document.getElementById('newFlour').value = totalFlourWeight.toFixed(1);
+        document.getElementById('conversionRatio').value = '1.000';
+
+        // 渲染烘烤資訊
+        const bakingCard = document.getElementById('bakingInfoCard');
+        bakingCard.innerHTML = `
+            <p><strong>上火溫度:</strong> ${bakingInfo.upperTemp || '-'}°C | 
+            <strong>下火溫度:</strong> ${bakingInfo.lowerTemp || '-'}°C</p>
+            <p><strong>烘烤時間:</strong> ${bakingInfo.bakeTime || '-'} 分鐘</p>
+            <p><strong>旋風:</strong> ${bakingInfo.convection || '-'} | 
+            <strong>蒸汽:</strong> ${bakingInfo.steam || '-'}</p>
+        `;
+        bakingCard.style.display = 'block';
+        
+        // 重置換算工具按鈕狀態
+        document.querySelectorAll('.conversion-option-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    // --- 3. 執行換算 ---
+
+    function runConversionWrapper() {
+        const recipeName = document.getElementById('recipeList').value;
+        const newTotalFlour = parseFloat(document.getElementById('newFlour').value);
+        const includeNonPercentageGroups = document.getElementById('includeNonPercentageGroups').checked;
+        
+        if (!recipeName) {
+            alert("請先選擇一個食譜。");
+            return;
+        }
+        if (isNaN(newTotalFlour) || newTotalFlour <= 0) {
+            alert("請輸入一個有效的目標麵粉總量 (大於 0)。");
+            return;
+        }
+
+        runConversion(recipeName, newTotalFlour, includeNonPercentageGroups);
+    }
+
+    async function runConversion(recipeName, newTotalFlour, includeNonPercentageGroups) {
+        showLoading(true, "執行食材換算...");
+
+        try {
+            const response = await fetch('/calculate_conversion', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    recipeName: recipeName,
+                    newTotalFlour: newTotalFlour,
+                    includeNonPercentageGroups: includeNonPercentageGroups
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) { 
+                throw new Error(result.message || '換算失敗');
+            }
+
+            handleConversionResult(result); // 成功處理函數
+
+        } catch (error) {
+            console.error('換算操作失敗:', error);
+            alert('食材換算失敗: ' + error.message);
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    function handleConversionResult(result) {
+        const ingredients = result.ingredients;
+        const container = document.getElementById('conversionResults');
+        container.innerHTML = `
+            <h3><i class="fas fa-check-circle"></i> 換算成功</h3>
+            <div class="recipe-info-card">
+                <p><strong>原始麵粉總量:</strong> ${result.originalTotalFlour.toFixed(1)} g</p>
+                <p><strong>目標麵粉總量:</strong> ${result.newTotalFlour.toFixed(1)} g</p>
+                <p><strong>換算比例:</strong> ${result.conversionRatio.toFixed(3)}</p>
+            </div>
+            <table class="conversion-results-table">
+                <thead>
+                    <tr>
+                        <th>分組</th>
+                        <th>食材</th>
+                        <th>換算後重量 (g)</th>
+                        <th>原始百分比</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${ingredients.map(ing => {
+                        const weight = parseFloat(ing['重量 (g)']).toFixed(1);
+                        const percentageStr = (ing['百分比'] !== undefined && ing['百分比'] !== null) 
+                                            ? (ing['百分比'] * 100).toFixed(2) + '%' 
+                                            : '-';
+                        return `
+                            <tr ${ing['食材'].includes('麵粉') ? 'style="font-weight:bold; background-color: #ffe0b2;"' : ''}>
+                                <td>${ing['分組'] || '-'}</td>
+                                <td>${ing['食材'] || '-'}</td>
+                                <td>${weight}</td>
+                                <td>${percentageStr}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+    }
+
+    // =================================================================
+    // UI/工具函數 (保持或微調)
+    // =================================================================
+
+    function showLoading(show, message = "處理中...") {
+        const indicator = document.getElementById('loadingIndicator');
+        indicator.querySelector('div:last-child').textContent = message;
+        indicator.style.display = show ? 'flex' : 'none';
+    }
+
+    function toggleConversionTool() {
+        const tool = document.getElementById('conversionTool');
+        const btn = document.getElementById('toggleConversionBtn');
+        const isHidden = tool.style.display === 'none';
+
+        if (isHidden) {
+            // 只有當已選擇食譜時才顯示
+            if (document.getElementById('recipeList').value) {
+                tool.style.display = 'block';
+                btn.innerHTML = '<i class="fas fa-times-circle"></i> 隱藏換算工具';
+            } else {
+                alert("請先選擇一個食譜才能使用換算工具。");
+            }
+        } else {
+            tool.style.display = 'none';
+            btn.innerHTML = '<i class="fas fa-calculator"></i> 顯示換算工具';
+        }
+    }
+    
+    function updateConversionToolButton() {
+        const tool = document.getElementById('conversionTool');
+        const btn = document.getElementById('toggleConversionBtn');
+        if (tool.style.display === 'block') {
+            btn.innerHTML = '<i class="fas fa-times-circle"></i> 隱藏換算工具';
+        } else {
+            btn.innerHTML = '<i class="fas fa-calculator"></i> 顯示換算工具';
+        }
+    }
+
+
+    // 修正：倍數按鈕點擊事件和輸入框變化時的處理
+    document.addEventListener('DOMContentLoaded', function() {
+        // 1. 為換算選項按鈕添加點擊事件
+        document.querySelectorAll('.conversion-option-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                // 移除所有按鈕的 active 狀態
+                document.querySelectorAll('.conversion-option-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active'); // 設置當前按鈕為 active
+                
+                const ratio = parseFloat(this.getAttribute('data-ratio'));
+                const originalFlour = parseFloat(document.getElementById('originalFlour').value) || 0;
+                
+                if (originalFlour > 0) {
+                    const newFlour = originalFlour * ratio;
+                    
+                    document.getElementById('newFlour').value = newFlour.toFixed(1);
+                    document.getElementById('conversionRatio').value = ratio.toFixed(3);
+                }
+            });
+        });
+        
+        // 2. 新增：目標麵粉輸入框變化時取消選中的倍數按鈕並重新計算比例
+        document.getElementById('newFlour').addEventListener('input', function() {
+            // 取消所有倍數按鈕的 active 狀態
+            document.querySelectorAll('.conversion-option-btn').forEach(b => b.classList.remove('active'));
+            
+            const originalFlour = parseFloat(document.getElementById('originalFlour').value) || 0;
+            const newFlour = parseFloat(this.value) || 0;
+            const ratioInput = document.getElementById('conversionRatio');
+            
+            if (newFlour > 0 && originalFlour > 0) {
+                const ratio = newFlour / originalFlour;
+                ratioInput.value = ratio.toFixed(3);
+            } else {
+                ratioInput.value = '0.000';
+            }
+        });
+    });
+
+</script>
+</body>
+</html>
